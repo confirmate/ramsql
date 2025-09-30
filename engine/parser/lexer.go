@@ -102,6 +102,10 @@ const (
 
 	ArgToken
 	NamedArgToken
+
+	// Comment tokens
+	SingleLineCommentToken
+	MultiLineCommentToken
 )
 
 // Token struct holds token id and it's lexeme
@@ -132,6 +136,9 @@ func (l *lexer) lex(instruction []byte) ([]Token, error) {
 	matchers = append(matchers, l.MatchNamedArgToken)
 	matchers = append(matchers, l.MatchArgToken)
 	matchers = append(matchers, l.MatchFloatToken)
+	// Comment matchers - add these early to handle comments before other tokens
+	matchers = append(matchers, l.MatchSingleLineComment)
+	matchers = append(matchers, l.MatchMultiLineComment)
 	// Punctuation Matcher
 	matchers = append(matchers, l.MatchSpaceToken)
 	matchers = append(matchers, l.genericByteMatcher(';', SemicolonToken))
@@ -600,6 +607,62 @@ func (l *lexer) MatchSingle(char byte, token int) bool {
 
 	l.tokens = append(l.tokens, t)
 	l.pos++
+	return true
+}
+
+// MatchSingleLineComment matches single-line comments starting with --
+func (l *lexer) MatchSingleLineComment() bool {
+	if l.pos+1 >= l.instructionLen {
+		return false
+	}
+
+	if l.instruction[l.pos] != '-' || l.instruction[l.pos+1] != '-' {
+		return false
+	}
+
+	i := l.pos + 2
+	// Read until end of line or end of instruction
+	for i < l.instructionLen && l.instruction[i] != '\n' && l.instruction[i] != '\r' {
+		i++
+	}
+
+	t := Token{
+		Token:  SingleLineCommentToken,
+		Lexeme: string(l.instruction[l.pos:i]),
+	}
+	l.tokens = append(l.tokens, t)
+	l.pos = i
+	return true
+}
+
+// MatchMultiLineComment matches multi-line comments enclosed in /* */
+func (l *lexer) MatchMultiLineComment() bool {
+	if l.pos+1 >= l.instructionLen {
+		return false
+	}
+
+	if l.instruction[l.pos] != '/' || l.instruction[l.pos+1] != '*' {
+		return false
+	}
+
+	i := l.pos + 2
+	// Read until we find */ or reach end of instruction
+	for i+1 < l.instructionLen {
+		if l.instruction[i] == '*' && l.instruction[i+1] == '/' {
+			i += 2
+			break
+		}
+		i++
+	}
+
+	// If we reached the end without finding closing */, it's an unterminated comment
+	// but we'll still tokenize what we have
+	t := Token{
+		Token:  MultiLineCommentToken,
+		Lexeme: string(l.instruction[l.pos:i]),
+	}
+	l.tokens = append(l.tokens, t)
+	l.pos = i
 	return true
 }
 

@@ -4,6 +4,12 @@ import (
 	"testing"
 )
 
+func TestParserComment(t *testing.T) {
+	query := `-- test
+CREATE TABLE account (id INT, email TEXT)`
+	parse(query, 1, t)
+}
+
 func TestParserCreateTableSimple(t *testing.T) {
 	query := `CREATE TABLE account (id INT, email TEXT)`
 	parse(query, 1, t)

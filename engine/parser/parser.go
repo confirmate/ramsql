@@ -80,7 +80,7 @@ func (d *Decl) Add(subDecl *Decl) {
 }
 
 func (p *parser) parse(tokens []Token) ([]Instruction, error) {
-	tokens = stripSpaces(tokens)
+	tokens = stripSpacesAndComments(tokens)
 	p.tokens = tokens
 	log.Debug("parser.parse: %v\n", p.tokens)
 
@@ -95,6 +95,12 @@ func (p *parser) parse(tokens []Token) ([]Instruction, error) {
 
 		// Ignore space token, not needed anymore
 		if tokens[p.index].Token == SpaceToken {
+			p.index++
+			continue
+		}
+
+		// Ignore comment tokens
+		if tokens[p.index].Token == SingleLineCommentToken || tokens[p.index].Token == MultiLineCommentToken {
 			p.index++
 			continue
 		}
@@ -775,9 +781,9 @@ func (p *parser) syntaxError() error {
 	return fmt.Errorf("Syntax error near %v %v %v", p.tokens[p.index-1].Lexeme, p.tokens[p.index].Lexeme, p.tokens[p.index+1].Lexeme)
 }
 
-func stripSpaces(t []Token) (ret []Token) {
+func stripSpacesAndComments(t []Token) (ret []Token) {
 	for i := range t {
-		if t[i].Token != SpaceToken {
+		if t[i].Token != SpaceToken && t[i].Token != SingleLineCommentToken && t[i].Token != MultiLineCommentToken {
 			ret = append(ret, t[i])
 		}
 	}
