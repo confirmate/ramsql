@@ -1757,6 +1757,51 @@ func TestInsertMultipleReturning(t *testing.T) {
 	}
 }
 
+func TestInsertReturningMultipleColumns(t *testing.T) {
+
+	db, err := sql.Open("ramsql", "TestInsertReturningMultipleColumns")
+	if err != nil {
+		t.Fatalf("sql.Open : Error : %s\n", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec("CREATE TABLE cat (id INT AUTOINCREMENT, breed TEXT, name TEXT)")
+	if err != nil {
+		t.Fatalf("sql.Exec: Error: %s\n", err)
+	}
+
+	rows, err := db.Query("INSERT INTO cat (breed, name) VALUES ('persian', 'Fluffy') RETURNING id, name, breed")
+	if err != nil {
+		t.Fatalf("Cannot insert into table cat: %s", err)
+	}
+	defer rows.Close()
+
+	hasRow := rows.Next()
+	if !hasRow {
+		t.Fatalf("Did not return a row")
+	}
+
+	var id int
+	var name string
+	var breed string
+	err = rows.Scan(&id, &name, &breed)
+	if err != nil {
+		t.Fatalf("row.Scan: %s", err)
+	}
+
+	if id != 1 {
+		t.Fatalf("Expected id 1, got id %v", id)
+	}
+
+	if name != "Fluffy" {
+		t.Fatalf("Expected name 'Fluffy', got name '%v'", name)
+	}
+
+	if breed != "persian" {
+		t.Fatalf("Expected breed 'persian', got breed '%v'", breed)
+	}
+}
+
 func TestJoinOrderBy(t *testing.T) {
 
 	db, err := sql.Open("ramsql", "TestJoinOrderBy")

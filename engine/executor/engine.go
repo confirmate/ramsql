@@ -263,12 +263,15 @@ func insertIntoTableExecutor(t *Tx, insertDecl *parser.Decl, args []NamedValue) 
 		for i := range insertDecl.Decl {
 			if insertDecl.Decl[i].Token == parser.ReturningToken {
 				returningDecl := insertDecl.Decl[i]
-				returningAttrs = append(returningAttrs, returningDecl.Decl[0].Lexeme)
-				idx, _, err := t.tx.RelationAttribute(schemaName, relationName, returningDecl.Decl[0].Lexeme)
-				if err != nil {
-					return 0, 0, nil, nil, fmt.Errorf("cannot return %s, doesn't exist in relation %s", returningDecl.Decl[0].Lexeme, relationName)
+				// Process all attributes in the RETURNING clause
+				for _, attrDecl := range returningDecl.Decl {
+					returningAttrs = append(returningAttrs, attrDecl.Lexeme)
+					idx, _, err := t.tx.RelationAttribute(schemaName, relationName, attrDecl.Lexeme)
+					if err != nil {
+						return 0, 0, nil, nil, fmt.Errorf("cannot return %s, doesn't exist in relation %s", attrDecl.Lexeme, relationName)
+					}
+					returningIdx = append(returningIdx, idx)
 				}
-				returningIdx = append(returningIdx, idx)
 			}
 		}
 	}
@@ -617,9 +620,12 @@ func updateExecutor(t *Tx, updateDecl *parser.Decl, args []NamedValue) (int64, i
 		for i := range updateDecl.Decl {
 			if updateDecl.Decl[i].Token == parser.ReturningToken {
 				returningDecl := updateDecl.Decl[i]
-				_, _, err := t.tx.RelationAttribute(schema, relation, returningDecl.Decl[0].Lexeme)
-				if err != nil {
-					return 0, 0, nil, nil, fmt.Errorf("cannot return %s, doesn't exist in relation %s", returningDecl.Decl[0].Lexeme, relation)
+				// Validate all attributes in the RETURNING clause
+				for _, attrDecl := range returningDecl.Decl {
+					_, _, err := t.tx.RelationAttribute(schema, relation, attrDecl.Lexeme)
+					if err != nil {
+						return 0, 0, nil, nil, fmt.Errorf("cannot return %s, doesn't exist in relation %s", attrDecl.Lexeme, relation)
+					}
 				}
 			}
 		}
@@ -681,9 +687,12 @@ func deleteExecutor(t *Tx, decl *parser.Decl, args []NamedValue) (int64, int64, 
 		for i := range decl.Decl {
 			if decl.Decl[i].Token == parser.ReturningToken {
 				returningDecl := decl.Decl[i]
-				_, _, err := t.tx.RelationAttribute(schema, relation, returningDecl.Decl[0].Lexeme)
-				if err != nil {
-					return 0, 0, nil, nil, fmt.Errorf("cannot return %s, doesn't exist in relation %s", returningDecl.Decl[0].Lexeme, relation)
+				// Validate all attributes in the RETURNING clause
+				for _, attrDecl := range returningDecl.Decl {
+					_, _, err := t.tx.RelationAttribute(schema, relation, attrDecl.Lexeme)
+					if err != nil {
+						return 0, 0, nil, nil, fmt.Errorf("cannot return %s, doesn't exist in relation %s", attrDecl.Lexeme, relation)
+					}
 				}
 			}
 		}
