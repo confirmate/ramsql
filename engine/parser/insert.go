@@ -112,12 +112,24 @@ func (p *parser) parseInsert() (*Instruction, error) {
 	if retDecl, err := p.consumeToken(ReturningToken); err == nil {
 		insertDecl.Add(retDecl)
 
-		// returned attribute
-		attrDecl, err := p.parseAttribute()
-		if err != nil {
-			return nil, err
+		// Parse returned attributes (can be multiple, comma-separated)
+		for {
+			attrDecl, err := p.parseAttribute()
+			if err != nil {
+				return nil, err
+			}
+			retDecl.Add(attrDecl)
+
+			// Check if there are more attributes
+			if p.is(CommaToken) {
+				if err := p.next(); err != nil {
+					return nil, err
+				}
+				continue
+			}
+
+			break
 		}
-		retDecl.Add(attrDecl)
 	}
 
 	return i, nil

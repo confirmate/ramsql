@@ -314,6 +314,7 @@ func TestReturning(t *testing.T) {
 	queries := []string{
 		`INSERT INTO test (foo, bar) VALUES ('foo', 'bar') RETURNING id`,
 		`INSERT INTO test (foo, bar) VALUES ('foo', 'bar') RETURNING "id"`,
+		`INSERT INTO test (foo, bar) VALUES ('foo', 'bar') RETURNING "id", "name"`,
 	}
 
 	for _, q := range queries {
