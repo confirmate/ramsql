@@ -175,6 +175,78 @@ func (p *parser) parseIndex(tokens []Token) (*Decl, error) {
 	return indexDecl, nil
 }
 
+func (p *parser) parseForeignKeyConstraint() (*Decl, error) {
+	constraintDecl, err := p.consumeToken(ConstraintToken)
+	if err != nil {
+		return nil, err
+	}
+
+	// Constraint name
+	nameDecl, err := p.parseQuotedToken()
+	if err != nil {
+		return nil, err
+	}
+	constraintDecl.Add(nameDecl)
+
+	// FOREIGN KEY
+	foreignDecl, err := p.consumeToken(ForeignToken)
+	if err != nil {
+		return nil, err
+	}
+	keyDecl, err := p.consumeToken(KeyToken)
+	if err != nil {
+		return nil, err
+	}
+	constraintDecl.Add(foreignDecl)
+	foreignDecl.Add(keyDecl)
+
+	// (column_name)
+	_, err = p.consumeToken(BracketOpeningToken)
+	if err != nil {
+		return nil, err
+	}
+	columnDecl, err := p.parseQuotedToken()
+	if err != nil {
+		return nil, err
+	}
+	keyDecl.Add(columnDecl)
+	_, err = p.consumeToken(BracketClosingToken)
+	if err != nil {
+		return nil, err
+	}
+
+	// REFERENCES table_name(column_name)
+	referencesDecl, err := p.consumeToken(ReferencesToken)
+	if err != nil {
+		return nil, err
+	}
+	keyDecl.Add(referencesDecl)
+
+	// Referenced table
+	tableDecl, err := p.parseTableName()
+	if err != nil {
+		return nil, err
+	}
+	referencesDecl.Add(tableDecl)
+
+	// Referenced column
+	_, err = p.consumeToken(BracketOpeningToken)
+	if err != nil {
+		return nil, err
+	}
+	refColumnDecl, err := p.parseQuotedToken()
+	if err != nil {
+		return nil, err
+	}
+	tableDecl.Add(refColumnDecl)
+	_, err = p.consumeToken(BracketClosingToken)
+	if err != nil {
+		return nil, err
+	}
+
+	return constraintDecl, nil
+}
+
 func (p *parser) parseTable(tokens []Token) (*Decl, error) {
 	var err error
 	tableDecl := NewDecl(tokens[p.index])
@@ -227,6 +299,13 @@ func (p *parser) parseTable(tokens []Token) (*Decl, error) {
 				return nil, err
 			}
 			tableDecl.Add(pkDecl)
+			continue
+		case ConstraintToken:
+			constraintDecl, err := p.parseForeignKeyConstraint()
+			if err != nil {
+				return nil, err
+			}
+			tableDecl.Add(constraintDecl)
 			continue
 		default:
 		}

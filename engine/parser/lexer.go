@@ -22,6 +22,11 @@ const (
 	GreaterOrEqualToken
 	BacktickToken
 
+	// Constraint tokens
+	ConstraintToken
+	ForeignToken
+	ReferencesToken
+
 	// QuoteToken
 
 	DoubleQuoteToken
@@ -204,6 +209,10 @@ func (l *lexer) lex(instruction []byte) ([]Token, error) {
 	matchers = append(matchers, l.genericStringMatcher("on", OnToken))
 	matchers = append(matchers, l.genericStringMatcher("collate", CollateToken))
 	matchers = append(matchers, l.genericStringMatcher("nocase", NocaseToken))
+	// Constraint matchers
+	matchers = append(matchers, l.genericStringMatcher("constraint", ConstraintToken))
+	matchers = append(matchers, l.genericStringMatcher("foreign", ForeignToken))
+	matchers = append(matchers, l.genericStringMatcher("references", ReferencesToken))
 	// Type Matcher
 	matchers = append(matchers, l.genericStringMatcher("decimal", DecimalToken))
 	matchers = append(matchers, l.genericStringMatcher("primary", PrimaryToken))
