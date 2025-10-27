@@ -1104,7 +1104,7 @@ func (p *EqPredicate) Relation() string {
 		return p.left.Relation()
 	}
 
-	// Check left first, then fall back to right if empty
+	// Check left first, then fall back to right (if empty)
 	if p.left.Relation() != "" {
 		return p.left.Relation()
 	}
