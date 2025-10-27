@@ -517,12 +517,17 @@ func selectExecutor(t *Tx, selectDecl *parser.Decl, args []NamedValue) (int64, i
 			if len(selectDecl.Decl[i].Decl) == 0 {
 				return 0, 0, nil, nil, fmt.Errorf("LIMIT clause requires a value")
 			}
-			limit, err := strconv.ParseInt(selectDecl.Decl[i].Decl[0].Lexeme, 10, 64)
-			if err != nil {
-				return 0, 0, nil, nil, fmt.Errorf("wrong LIMIT value: %s", err)
+			decl := selectDecl.Decl[i].Decl[0]
+			if decl.Token == parser.NumberToken || decl.Token == parser.StringToken {
+				limit, err := strconv.ParseInt(decl.Lexeme, 10, 64)
+				if err != nil {
+					return 0, 0, nil, nil, fmt.Errorf("wrong LIMIT value: %s", err)
+				}
+				// Always add limit sorter last to ensure it's applied after other sorters
+				sorters = append(sorters, agnostic.NewLimitSorter(limit))
+			} else {
+				return 0, 0, nil, nil, fmt.Errorf("LIMIT clause requires a number value")
 			}
-			// Always add limit sorter last to ensure it's applied after other sorters
-			sorters = append(sorters, agnostic.NewLimitSorter(limit))
 			continue
 		}
 	}

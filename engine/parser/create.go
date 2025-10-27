@@ -292,22 +292,28 @@ func (p *parser) parseTable(tokens []Token) (*Decl, error) {
 
 	for p.index < len(tokens) {
 
-		switch p.cur().Token {
-		case PrimaryToken:
-			pkDecl, err := p.parsePrimaryKey()
-			if err != nil {
-				return nil, err
+		// Handle primary key and constraints at table level
+		if p.cur().Token == PrimaryToken || p.cur().Token == ConstraintToken {
+			switch p.cur().Token {
+			case PrimaryToken:
+				pkDecl, err := p.parsePrimaryKey()
+				if err != nil {
+					return nil, err
+				}
+				tableDecl.Add(pkDecl)
+			case ConstraintToken:
+				constraintDecl, err := p.parseForeignKeyConstraint()
+				if err != nil {
+					return nil, err
+				}
+				tableDecl.Add(constraintDecl)
 			}
-			tableDecl.Add(pkDecl)
-			continue
-		case ConstraintToken:
-			constraintDecl, err := p.parseForeignKeyConstraint()
-			if err != nil {
-				return nil, err
+			
+			// After constraint/key, expect either comma or closing bracket
+			if p.cur().Token == CommaToken {
+				p.index++
 			}
-			tableDecl.Add(constraintDecl)
 			continue
-		default:
 		}
 
 		// Closing bracket ?
