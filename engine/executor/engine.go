@@ -220,11 +220,59 @@ func createTableExecutor(t *Tx, tableDecl *parser.Decl, args []NamedValue) (int6
 		i++
 	}
 
+	// Fetch table-level PRIMARY KEY
 	if i < len(tableDecl.Decl) && tableDecl.Decl[i].Token == parser.PrimaryToken {
 		d := tableDecl.Decl[i].Decl[0]
 		for _, attr := range d.Decl {
 			pk = append(pk, attr.Lexeme)
 		}
+		i++
+	}
+
+	// Fetch table-level FOREIGN KEY constraints and distribute them to attributes directly
+	for i < len(tableDecl.Decl) {
+		if tableDecl.Decl[i].Token == parser.ForeignToken {
+			fk, err := parseTableForeignKey(tableDecl.Decl[i], "")
+			if err != nil {
+				return 0, 0, nil, nil, err
+			}
+			// distribute fk to local columns by attaching fk struct to each attribute
+			for _, lc := range fk.LocalColumns() {
+				for ai := range attributes {
+					if attributes[ai].Name() == lc {
+						attributes[ai] = attributes[ai].WithForeignKeyStruct(fk)
+						break
+					}
+				}
+			}
+			i++
+			continue
+		}
+		if tableDecl.Decl[i].Token == parser.ConstraintToken {
+			// CONSTRAINT name FOREIGN KEY (...)
+			constraintName := ""
+			if len(tableDecl.Decl[i].Decl) > 0 {
+				constraintName = tableDecl.Decl[i].Decl[0].Lexeme
+			}
+			if len(tableDecl.Decl[i].Decl) > 1 && tableDecl.Decl[i].Decl[1].Token == parser.ForeignToken {
+				fk, err := parseTableForeignKey(tableDecl.Decl[i].Decl[1], constraintName)
+				if err != nil {
+					return 0, 0, nil, nil, err
+				}
+				for _, lc := range fk.LocalColumns() {
+					for ai := range attributes {
+						if attributes[ai].Name() == lc {
+							attributes[ai] = attributes[ai].WithForeignKeyStruct(fk)
+							break
+						}
+					}
+				}
+			}
+			i++
+			continue
+		}
+		// Any other token (should be covered by prior loops or parser)
+		break
 	}
 
 	err := t.tx.CreateRelation(schemaName, relationName, attributes, pk)
@@ -232,6 +280,60 @@ func createTableExecutor(t *Tx, tableDecl *parser.Decl, args []NamedValue) (int6
 		return 0, 0, nil, nil, err
 	}
 	return 0, 1, nil, nil, nil
+}
+
+// parseTableForeignKey extracts a ForeignKey from a FOREIGN KEY decl node.
+// fkDecl structure: FOREIGN -> KEY -> (list of columns) -> REFERENCES -> ...
+func parseTableForeignKey(fkDecl *parser.Decl, constraintName string) (agnostic.ForeignKey, error) {
+	fk := agnostic.NewForeignKey(constraintName)
+
+	if len(fkDecl.Decl) == 0 {
+		return fk, fmt.Errorf("FOREIGN KEY has no children")
+	}
+
+	// First child should be KEY token with column list
+	keyDecl := fkDecl.Decl[0]
+	if keyDecl.Token != parser.KeyToken {
+		return fk, fmt.Errorf("expected KEY token after FOREIGN")
+	}
+
+	// Extract local columns
+	for _, colDecl := range keyDecl.Decl {
+		if colDecl.Token == parser.StringToken {
+			fk = fk.WithLocalColumn(colDecl.Lexeme)
+		}
+	}
+
+	// Second child should be REFERENCES
+	if len(fkDecl.Decl) < 2 || fkDecl.Decl[1].Token != parser.ReferencesToken {
+		return fk, fmt.Errorf("expected REFERENCES after FOREIGN KEY columns")
+	}
+
+	refDecl := fkDecl.Decl[1]
+	if len(refDecl.Decl) == 0 {
+		return fk, fmt.Errorf("REFERENCES has no children")
+	}
+
+	// First child of REFERENCES is table name (may be schema-qualified)
+	tblDecl := refDecl.Decl[0]
+	if tblDecl.Token == parser.SchemaToken {
+		// schema.table form
+		fk = fk.WithRefSchema(tblDecl.Lexeme)
+		if len(tblDecl.Decl) > 0 {
+			fk = fk.WithRefRelation(tblDecl.Decl[0].Lexeme)
+		}
+	} else {
+		fk = fk.WithRefRelation(tblDecl.Lexeme)
+	}
+
+	// Remaining children are referenced columns
+	for i := 1; i < len(refDecl.Decl); i++ {
+		if refDecl.Decl[i].Token == parser.StringToken {
+			fk = fk.WithRefColumn(refDecl.Decl[i].Lexeme)
+		}
+	}
+
+	return fk, nil
 }
 
 /*

@@ -2054,6 +2054,202 @@ func TestOrderByString(t *testing.T) {
 
 }
 
+func TestForeignKeyCreateTableSupportedParsing(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestForeignKeyCreateTableSupportedParsing")
+	if err != nil {
+		t.Fatalf("sql.Open : Error : %s\n", err)
+	}
+	defer db.Close()
+
+	// Base tables should be creatable.
+	_, err = db.Exec(`CREATE TABLE users (id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL)`)
+	if err != nil {
+		t.Fatalf("unexpected error creating users: %s", err)
+	}
+	_, err = db.Exec(`CREATE TABLE projects (id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL)`)
+	if err != nil {
+		t.Fatalf("unexpected error creating projects: %s", err)
+	}
+
+	// Creating a cross table with FOREIGN KEY constraints should succeed.
+	// FK constraints are parsed and attached to attributes; enforcement is handled separately by DML paths.
+	_, err = db.Exec(`CREATE TABLE memberships (
+		user_id BIGINT,
+		project_id BIGINT,
+		FOREIGN KEY (user_id) REFERENCES users(id),
+		FOREIGN KEY (project_id) REFERENCES projects(id)
+	)`)
+	if err != nil {
+		t.Fatalf("unexpected error creating memberships with FK clauses: %s", err)
+	}
+}
+
+func TestForeignKeyCreateTableSupportedParsing_ConstraintForm(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestForeignKeyCreateTableSupportedParsing_ConstraintForm")
+	if err != nil {
+		t.Fatalf("sql.Open : Error : %s\n", err)
+	}
+	defer db.Close()
+
+	// Base tables
+	if _, err := db.Exec(`CREATE TABLE users (id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL)`); err != nil {
+		t.Fatalf("unexpected error creating users: %s", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE projects (id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL)`); err != nil {
+		t.Fatalf("unexpected error creating projects: %s", err)
+	}
+
+	// Attempt to use CONSTRAINT ... FOREIGN KEY ... REFERENCES ... form
+	_, err = db.Exec(`CREATE TABLE memberships_with_constraints (
+		user_id BIGINT,
+		project_id BIGINT,
+		CONSTRAINT memberships_user_fkey FOREIGN KEY (user_id) REFERENCES users(id),
+		CONSTRAINT memberships_project_fkey FOREIGN KEY (project_id) REFERENCES projects(id)
+	)`)
+	if err != nil {
+		t.Fatalf("unexpected error creating memberships table with CONSTRAINT/FK clauses: %s", err)
+	}
+}
+
+// This test documents current behavior: FK constraints are parsed but not enforced.
+// Inserting a memberships row referencing a non-existent users.id currently succeeds.
+func TestForeignKeyInsertWithoutParent_LegacyBehavior_Skipped(t *testing.T) {
+	// Legacy note: before FK enforcement, orphan inserts were allowed.
+	// This test is kept for historical reference and intentionally skipped.
+	t.Skip("legacy behavior (no FK enforcement): kept for reference")
+	db, err := sql.Open("ramsql", "TestForeignKeyInsertWithoutParent_LegacyBehavior_Skipped")
+	if err != nil {
+		t.Fatalf("sql.Open : Error : %s\n", err)
+	}
+	defer db.Close()
+
+	setup := []string{
+		`CREATE TABLE users (id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL)`,
+		`CREATE TABLE projects (id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL)`,
+		`CREATE TABLE memberships (
+			user_id BIGINT,
+			project_id BIGINT,
+			FOREIGN KEY (user_id) REFERENCES users(id),
+			FOREIGN KEY (project_id) REFERENCES projects(id)
+		)`,
+	}
+	for _, q := range setup {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("setup failed: %s (query: %s)", err, q)
+		}
+	}
+
+	// Neither user 999 nor project 888 exist; without enforcement this insert succeeds.
+	if _, err := db.Exec(`INSERT INTO memberships (user_id, project_id) VALUES (999, 888)`); err != nil {
+		t.Fatalf("unexpected error inserting orphan row (FK not enforced yet): %s", err)
+	}
+}
+
+// This is the desired behavior once FK enforcement is implemented.
+// Keep skipped until enforcement exists; then switch to a live, failing insert expectation.
+// Verify that inserting a child row without an existing parent is rejected (FK enforced)
+func TestForeignKeyInsertWithoutParent_ShouldFail(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestForeignKeyInsertWithoutParent_ShouldFail")
+	if err != nil {
+		t.Fatalf("sql.Open : Error : %s\n", err)
+	}
+	defer db.Close()
+
+	setup := []string{
+		`CREATE TABLE users (id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL)`,
+		`CREATE TABLE projects (id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL)`,
+		`CREATE TABLE memberships (
+			user_id BIGINT,
+			project_id BIGINT,
+			FOREIGN KEY (user_id) REFERENCES users(id),
+			FOREIGN KEY (project_id) REFERENCES projects(id)
+		)`,
+	}
+	for _, q := range setup {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("setup failed: %s (query: %s)", err, q)
+		}
+	}
+
+	// Desired behavior: reject orphan insert with a clear error.
+	if _, err := db.Exec(`INSERT INTO memberships (user_id, project_id) VALUES (999, 888)`); err == nil {
+		t.Fatalf("expected FK violation error, got nil")
+	}
+}
+
+// Verify that deleting a parent row referenced by a child is restricted
+func TestForeignKeyDeleteParent_ShouldFail(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestForeignKeyDeleteParent_ShouldFail")
+	if err != nil {
+		t.Fatalf("sql.Open : %s", err)
+	}
+	defer db.Close()
+
+	setup := []string{
+		`CREATE TABLE users (id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL)`,
+		`CREATE TABLE memberships (user_id BIGINT, FOREIGN KEY (user_id) REFERENCES users(id))`,
+	}
+	for _, q := range setup {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("setup failed: %s (q=%s)", err, q)
+		}
+	}
+
+	// insert a user
+	if _, err := db.Exec(`INSERT INTO users (name) VALUES ('Alice')`); err != nil {
+		t.Fatalf("insert user: %s", err)
+	}
+	// get id
+	var uid int64
+	if err := db.QueryRow(`SELECT id FROM users WHERE name = 'Alice'`).Scan(&uid); err != nil {
+		t.Fatalf("fetch id: %s", err)
+	}
+	// insert child referencing user
+	if _, err := db.Exec(`INSERT INTO memberships (user_id) VALUES ($1)`, uid); err != nil {
+		t.Fatalf("insert child: %s", err)
+	}
+	// attempt to delete parent -> should fail
+	if _, err := db.Exec(`DELETE FROM users WHERE id = $1`, uid); err == nil {
+		t.Fatalf("expected FK restrict error on delete, got nil")
+	}
+}
+
+// Verify that updating a parent key referenced by a child is restricted
+func TestForeignKeyUpdateParent_ShouldFail(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestForeignKeyUpdateParent_ShouldFail")
+	if err != nil {
+		t.Fatalf("sql.Open : %s", err)
+	}
+	defer db.Close()
+
+	setup := []string{
+		`CREATE TABLE users (id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL)`,
+		`CREATE TABLE memberships (user_id BIGINT, FOREIGN KEY (user_id) REFERENCES users(id))`,
+	}
+	for _, q := range setup {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("setup failed: %s (q=%s)", err, q)
+		}
+	}
+
+	// insert parent and child
+	if _, err := db.Exec(`INSERT INTO users (name) VALUES ('Bob')`); err != nil {
+		t.Fatalf("insert user: %s", err)
+	}
+	var uid int64
+	if err := db.QueryRow(`SELECT id FROM users WHERE name = 'Bob'`).Scan(&uid); err != nil {
+		t.Fatalf("fetch id: %s", err)
+	}
+	if _, err := db.Exec(`INSERT INTO memberships (user_id) VALUES ($1)`, uid); err != nil {
+		t.Fatalf("insert child: %s", err)
+	}
+
+	// attempt to update parent PK -> should fail
+	if _, err := db.Exec(`UPDATE users SET id = 999 WHERE id = $1`, uid); err == nil {
+		t.Fatalf("expected FK restrict error on parent update, got nil")
+	}
+}
+
 func TestOrderByLimit(t *testing.T) {
 
 	db, err := sql.Open("ramsql", "TestOrderByLimit")
