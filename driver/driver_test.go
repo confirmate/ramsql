@@ -2769,3 +2769,130 @@ func TestInformationSchema(t *testing.T) {
 		t.Fatalf("rows error: %s", err)
 	}
 }
+
+func TestSelectWithoutFrom(t *testing.T) {
+
+	db, err := sql.Open("ramsql", "TestSelectWithoutFrom")
+	if err != nil {
+		t.Fatalf("sql.Open: %s", err)
+	}
+	defer db.Close()
+
+	// Test SELECT 1
+	var result int
+	err = db.QueryRow("SELECT 1").Scan(&result)
+	if err != nil {
+		t.Fatalf("cannot execute SELECT 1: %s", err)
+	}
+
+	if result != 1 {
+		t.Errorf("expected 1, got %d", result)
+	}
+
+	// Test SELECT with multiple constants
+	var a, b int
+	err = db.QueryRow("SELECT 1, 2").Scan(&a, &b)
+	if err != nil {
+		t.Fatalf("cannot execute SELECT 1, 2: %s", err)
+	}
+
+	if a != 1 || b != 2 {
+		t.Errorf("expected 1, 2 got %d, %d", a, b)
+	}
+
+	// Test SELECT with string literal
+	var str string
+	err = db.QueryRow("SELECT 'hello'").Scan(&str)
+	if err != nil {
+		t.Fatalf("cannot execute SELECT 'hello': %s", err)
+	}
+
+	if str != "hello" {
+		t.Errorf("expected 'hello', got %s", str)
+	}
+
+	// Test SELECT with boolean literal true
+	var trueVal string
+	err = db.QueryRow("SELECT true").Scan(&trueVal)
+	if err != nil {
+		t.Fatalf("cannot execute SELECT true: %s", err)
+	}
+
+	if trueVal != "true" {
+		t.Errorf("expected 'true', got %v", trueVal)
+	}
+
+	// Test SELECT with boolean literal false
+	var falseVal string
+	err = db.QueryRow("SELECT false").Scan(&falseVal)
+	if err != nil {
+		t.Fatalf("cannot execute SELECT false: %s", err)
+	}
+
+	if falseVal != "false" {
+		t.Errorf("expected 'false', got %v", falseVal)
+	}
+}
+
+func TestSelectWithoutFromMixedTypes(t *testing.T) {
+
+	db, err := sql.Open("ramsql", "TestSelectWithoutFromMixedTypes")
+	if err != nil {
+		t.Fatalf("sql.Open: %s", err)
+	}
+	defer db.Close()
+
+	// Test SELECT with mixed literal types
+	var num int
+	var boolStr string
+	err = db.QueryRow("SELECT 1, true").Scan(&num, &boolStr)
+	if err != nil {
+		t.Fatalf("cannot execute SELECT 1, true: %s", err)
+	}
+
+	if num != 1 {
+		t.Errorf("expected 1, got %d", num)
+	}
+	if boolStr != "true" {
+		t.Errorf("expected 'true', got %s", boolStr)
+	}
+
+	// Test SELECT with string and number
+	var str string
+	var num2 int
+	err = db.QueryRow("SELECT 'hello', 42").Scan(&str, &num2)
+	if err != nil {
+		t.Fatalf("cannot execute SELECT 'hello', 42: %s", err)
+	}
+
+	if str != "hello" {
+		t.Errorf("expected 'hello', got %s", str)
+	}
+	if num2 != 42 {
+		t.Errorf("expected 42, got %d", num2)
+	}
+}
+
+func TestSelectWithoutFromInvalidColumn(t *testing.T) {
+
+	db, err := sql.Open("ramsql", "TestSelectWithoutFromInvalidColumn")
+	if err != nil {
+		t.Fatalf("sql.Open: %s", err)
+	}
+	defer db.Close()
+
+	// Test SELECT with non-existent column should return a proper error
+	var result string
+	err = db.QueryRow("SELECT nonexistent").Scan(&result)
+	if err == nil {
+		t.Fatal("expected error when selecting non-existent column, got nil")
+	}
+
+	// Error message should mention the column doesn't exist
+	errMsg := err.Error()
+	if errMsg == "" {
+		t.Errorf("expected meaningful error message, got empty string")
+	}
+	// Just verify we get an error, not a panic
+	t.Logf("Got expected error: %s", errMsg)
+}

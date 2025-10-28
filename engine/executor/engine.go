@@ -530,7 +530,11 @@ func selectExecutor(t *Tx, selectDecl *parser.Decl, args []NamedValue) (int64, i
 	for i := 0; i < len(selectDecl.Decl); i++ {
 		if selectDecl.Decl[i].Token != parser.StringToken &&
 			selectDecl.Decl[i].Token != parser.StarToken &&
-			selectDecl.Decl[i].Token != parser.CountToken {
+			selectDecl.Decl[i].Token != parser.CountToken &&
+			selectDecl.Decl[i].Token != parser.NumberToken &&
+			selectDecl.Decl[i].Token != parser.SimpleQuoteToken &&
+			selectDecl.Decl[i].Token != parser.TrueToken &&
+			selectDecl.Decl[i].Token != parser.FalseToken {
 			continue
 		}
 		// get attribute to select
@@ -541,6 +545,7 @@ func selectExecutor(t *Tx, selectDecl *parser.Decl, args []NamedValue) (int64, i
 		selectors = append(selectors, selector)
 	}
 
+	// Query handles both cases: with and without FROM clause
 	log.Debug("executing '%s' with %s, joining with %s and sorting with %s", selectors, predicate, joiners, sorters)
 	cols, res, err := t.tx.Query(schema, selectors, predicate, joiners, sorters)
 	if err != nil {

@@ -307,6 +307,16 @@ func (p *parser) parseBuiltinFunc() (*Decl, error) {
 		}
 	}
 
+	// CURRENT_SCHEMA() or CURRENT_SCHEMA
+	if p.is(CurrentSchemaToken) {
+		d, err = p.consumeToken(CurrentSchemaToken)
+		if err != nil {
+			return nil, err
+		}
+		// Optional brackets for CURRENT_SCHEMA()
+		// The lexer matches both "current_schema()" and "current_schema"
+	}
+
 	return d, nil
 }
 
@@ -596,7 +606,7 @@ func (p *parser) parseValue() (*Decl, error) {
 		}
 	}
 
-	valueDecl, err := p.consumeToken(FloatToken, StringToken, NumberToken, DateToken, NowToken, CurrentSchemaToken, ArgToken, NamedArgToken)
+	valueDecl, err := p.consumeToken(FloatToken, StringToken, NumberToken, DateToken, NowToken, CurrentSchemaToken, ArgToken, NamedArgToken, TrueToken, FalseToken)
 	if err != nil {
 		return nil, err
 	}
