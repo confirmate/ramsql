@@ -47,6 +47,7 @@ func (p *parser) parseSelect(tokens []Token) (*Instruction, error) {
 	}
 
 	for {
+		var needsNext bool = false
 		switch {
 		case p.is(CountToken):
 			attrDecl, err := p.parseBuiltinFunc()
@@ -54,6 +55,37 @@ func (p *parser) parseSelect(tokens []Token) (*Instruction, error) {
 				return nil, err
 			}
 			selectDecl.Add(attrDecl)
+		case p.is(NumberToken):
+			// Handle literal numbers in SELECT clause
+			attrDecl := NewDecl(p.cur())
+			selectDecl.Add(attrDecl)
+			needsNext = true // We need to advance since we didn't call parseAttribute
+		case p.is(SimpleQuoteToken):
+			// Handle quoted string literals in SELECT clause
+			if err := p.next(); err != nil {
+				return nil, err
+			}
+			if !p.is(StringToken) {
+				return nil, fmt.Errorf("expected string after quote")
+			}
+			// Use SimpleQuoteToken to mark this as a literal string value
+			attrDecl := &Decl{
+				Token:  SimpleQuoteToken,
+				Lexeme: p.cur().Lexeme,
+			}
+			selectDecl.Add(attrDecl)
+			if err := p.next(); err != nil {
+				return nil, err
+			}
+			if !p.is(SimpleQuoteToken) {
+				return nil, fmt.Errorf("expected closing quote")
+			}
+			needsNext = true
+		case p.is(TrueToken), p.is(FalseToken):
+			// Handle boolean literals in SELECT clause
+			attrDecl := NewDecl(p.cur())
+			selectDecl.Add(attrDecl)
+			needsNext = true
 		default:
 			attrDecl, err := p.parseAttribute()
 			if err != nil {
@@ -63,6 +95,15 @@ func (p *parser) parseSelect(tokens []Token) (*Instruction, error) {
 				distinctDecl.Add(attrDecl)
 			} else {
 				selectDecl.Add(attrDecl)
+			}
+			// parseAttribute already advanced the parser
+		}
+
+		// Advance parser if we handled a simple token (like NumberToken)
+		if needsNext {
+			if err := p.next(); err != nil {
+				// End of tokens is ok - might be SELECT 1 without FROM
+				break
 			}
 		}
 
@@ -83,10 +124,17 @@ func (p *parser) parseSelect(tokens []Token) (*Instruction, error) {
 		break
 	}
 
-	// Must be from now
-	if tokens[p.index].Token != FromToken {
-		return nil, fmt.Errorf("Syntax error near %v\n", tokens[p.index])
+	// FROM clause is optional (e.g., SELECT 1, SELECT CURRENT_SCHEMA())
+	if !p.hasNext() {
+		// No FROM clause, just return
+		return i, nil
 	}
+
+	if tokens[p.index].Token != FromToken {
+		// No FROM clause, continue to parse other clauses if any
+		return i, nil
+	}
+
 	fromDecl := NewDecl(tokens[p.index])
 	selectDecl.Add(fromDecl)
 

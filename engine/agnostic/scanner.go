@@ -71,3 +71,30 @@ func (s *RelationScanner) EstimateCardinal() int64 {
 func (s *RelationScanner) Children() []Node {
 	return nil
 }
+
+// SingleRowScanner generates a single empty row (for SELECT without FROM)
+// This allows ConstSelectors to work through the normal SelectorNode pipeline
+type SingleRowScanner struct{}
+
+func NewSingleRowScanner() *SingleRowScanner {
+	return &SingleRowScanner{}
+}
+
+func (s SingleRowScanner) String() string {
+	return "single row (SELECT without FROM)"
+}
+
+func (s *SingleRowScanner) Exec() ([]string, []*list.Element, error) {
+	// Return a single empty tuple with no columns
+	l := list.New()
+	l.PushBack(NewTuple())
+	return []string{}, []*list.Element{l.Front()}, nil
+}
+
+func (s *SingleRowScanner) EstimateCardinal() int64 {
+	return 1 // Always returns exactly one row
+}
+
+func (s *SingleRowScanner) Children() []Node {
+	return nil
+}

@@ -137,6 +137,34 @@ func (t *Tx) getSelector(attr *parser.Decl, schema string, tables []string, alia
 	var err error
 
 	switch attr.Token {
+	case parser.NumberToken:
+		// Handle literal numbers (e.g., SELECT 1)
+		relation := ""
+		if len(tables) > 0 {
+			relation = tables[0]
+		}
+		return agnostic.NewConstSelector(relation, attr.Lexeme), nil
+	case parser.SimpleQuoteToken:
+		// Handle literal strings (e.g., SELECT 'hello')
+		relation := ""
+		if len(tables) > 0 {
+			relation = tables[0]
+		}
+		return agnostic.NewConstSelector(relation, attr.Lexeme), nil
+	case parser.TrueToken:
+		// Handle true literal (e.g., SELECT true)
+		relation := ""
+		if len(tables) > 0 {
+			relation = tables[0]
+		}
+		return agnostic.NewConstSelector(relation, "true"), nil
+	case parser.FalseToken:
+		// Handle false literal (e.g., SELECT false)
+		relation := ""
+		if len(tables) > 0 {
+			relation = tables[0]
+		}
+		return agnostic.NewConstSelector(relation, "false"), nil
 	case parser.StarToken:
 		return agnostic.NewStarSelector(tables[0]), nil
 	case parser.CountToken:
@@ -164,6 +192,12 @@ func (t *Tx) getSelector(attr *parser.Decl, schema string, tables []string, alia
 			}
 			return agnostic.NewAttributeSelector(attr.Decl[0].Lexeme, []string{attribute}), nil
 		}
+		
+		// If no tables provided (SELECT without FROM), column doesn't exist
+		if len(tables) == 0 {
+			return nil, fmt.Errorf("column \"%s\" does not exist", attribute)
+		}
+		
 		for _, table := range tables {
 			_, _, err = t.tx.RelationAttribute(schema, getAlias(table, aliases), attribute)
 			if err == nil {
@@ -316,7 +350,7 @@ func (t *Tx) getPredicates(decl []*parser.Decl, schema, fromTableName string, ar
 
 	switch rightS.Token {
 	case parser.CurrentSchemaToken:
-		left = agnostic.NewConstValueFunctor(schema)
+		right = agnostic.NewConstValueFunctor(schema)
 	case parser.NamedArgToken:
 		for _, arg := range args {
 			if rightS.Lexeme == arg.Name {

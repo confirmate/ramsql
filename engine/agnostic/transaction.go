@@ -580,6 +580,10 @@ func (t *Transaction) Plan(schema string, selectors []Selector, p Predicate, joi
 	}
 	for _, sel := range selectors {
 		rel := sel.Relation()
+		if rel == "" {
+			// Skip selectors with no relation (constants in SELECT without FROM)
+			continue
+		}
 		r, err := s.Relation(rel)
 		if err != nil {
 			return nil, t.abort(err)
@@ -589,6 +593,15 @@ func (t *Transaction) Plan(schema string, selectors []Selector, p Predicate, joi
 		}
 		t.lock(r)
 		relations[rel] = r
+	}
+
+	// Handle SELECT without FROM (no relations to query)
+	if len(relations) == 0 {
+		// SELECT without FROM: create a SingleRowScanner and wrap with SelectorNode
+		// The SingleRowScanner provides one empty row, and the ConstSelectors
+		// will evaluate to their constant values through the normal selector pipeline
+		singleRow := NewSingleRowScanner()
+		return NewSelectorNode(selectors, singleRow), nil
 	}
 
 	// (2)
