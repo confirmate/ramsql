@@ -55,6 +55,11 @@ func (p *parser) parseSelect(tokens []Token) (*Instruction, error) {
 				return nil, err
 			}
 			selectDecl.Add(attrDecl)
+		case p.is(CurrentSchemaToken):
+			// Handle CURRENT_SCHEMA() function
+			attrDecl := NewDecl(p.cur())
+			selectDecl.Add(attrDecl)
+			needsNext = true
 		case p.is(NumberToken):
 			// Handle literal numbers in SELECT clause
 			attrDecl := NewDecl(p.cur())

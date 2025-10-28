@@ -52,7 +52,8 @@ type Picker interface {
 // Possible ValueFunctor implementation:
 //   - ConstValueFunctor
 //   - AttributeValueFunctor
-//   - NowValueFunctor
+//   - NowValueFunctor (see builtins.go)
+//   - CurrentSchemaValueFunctor (see builtins.go)
 type ValueFunctor interface {
 	Picker
 	Value(columns []string, tuple *Tuple) any
@@ -1465,31 +1466,6 @@ func (f *AttributeValueFunctor) Attribute() []string {
 
 func (f AttributeValueFunctor) String() string {
 	return f.rname + "." + f.aname
-}
-
-type NowValueFunctor struct {
-}
-
-// NewNowValueFunctor creates a ValueFunctor returning time.Now()
-func NewNowValueFunctor() ValueFunctor {
-	f := &NowValueFunctor{}
-	return f
-}
-
-func (f *NowValueFunctor) Value([]string, *Tuple) any {
-	return time.Now()
-}
-
-func (f *NowValueFunctor) Relation() string {
-	return ""
-}
-
-func (f *NowValueFunctor) Attribute() []string {
-	return nil
-}
-
-func (f NowValueFunctor) String() string {
-	return "now()"
 }
 
 type GeqPredicate struct {

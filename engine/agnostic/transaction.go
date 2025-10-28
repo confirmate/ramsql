@@ -79,6 +79,11 @@ func (t Transaction) Error() error {
 	return t.err
 }
 
+// Engine returns the underlying engine for accessing configuration like search_path
+func (t *Transaction) Engine() *Engine {
+	return t.e
+}
+
 func (t *Transaction) Truncate(schema, relation string) (int64, error) {
 	if err := t.aborted(); err != nil {
 		return 0, err
@@ -115,6 +120,11 @@ func (t *Transaction) RelationAttribute(schName, relName, attrName string) (int,
 	}
 
 	return r.Attribute(attrName)
+}
+
+// CurrentSchema returns the first schema in the search path
+func (t *Transaction) CurrentSchema() string {
+	return t.e.CurrentSchema()
 }
 
 func (t *Transaction) CheckRelation(schemaName, relName string) bool {

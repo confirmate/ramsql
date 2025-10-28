@@ -137,6 +137,13 @@ func (t *Tx) getSelector(attr *parser.Decl, schema string, tables []string, alia
 	var err error
 
 	switch attr.Token {
+	case parser.CurrentSchemaToken:
+		// Handle CURRENT_SCHEMA() function
+		relation := ""
+		if len(tables) > 0 {
+			relation = tables[0]
+		}
+		return agnostic.NewConstSelector(relation, t.tx.Engine().CurrentSchema()), nil
 	case parser.NumberToken:
 		// Handle literal numbers (e.g., SELECT 1)
 		relation := ""
@@ -318,7 +325,8 @@ func (t *Tx) getPredicates(decl []*parser.Decl, schema, fromTableName string, ar
 
 	switch leftS.Token {
 	case parser.CurrentSchemaToken:
-		left = agnostic.NewConstValueFunctor(schema)
+		// Use the builtin function functor for CURRENT_SCHEMA()
+		left = agnostic.NewCurrentSchemaFunctor(t.tx.Engine())
 	case parser.NamedArgToken:
 		for _, arg := range args {
 			if leftS.Lexeme == arg.Name {
@@ -350,7 +358,8 @@ func (t *Tx) getPredicates(decl []*parser.Decl, schema, fromTableName string, ar
 
 	switch rightS.Token {
 	case parser.CurrentSchemaToken:
-		right = agnostic.NewConstValueFunctor(schema)
+		// Use the builtin function functor for CURRENT_SCHEMA()
+		right = agnostic.NewCurrentSchemaFunctor(t.tx.Engine())
 	case parser.NamedArgToken:
 		for _, arg := range args {
 			if rightS.Lexeme == arg.Name {
