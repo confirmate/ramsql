@@ -228,6 +228,39 @@ func (p *parser) parseTable(tokens []Token) (*Decl, error) {
 			}
 			tableDecl.Add(pkDecl)
 			continue
+		case ForeignToken:
+			fkDecl, err := p.parseTableForeignKey()
+			if err != nil {
+				return nil, err
+			}
+			tableDecl.Add(fkDecl)
+			continue
+		case ConstraintToken:
+			// CONSTRAINT name FOREIGN KEY ... REFERENCES ...
+			cDecl, err := p.consumeToken(ConstraintToken)
+			if err != nil {
+				return nil, err
+			}
+			nameDecl, err := p.parseQuotedToken()
+			if err != nil {
+				return nil, err
+			}
+			cDecl.Add(nameDecl)
+			// require a FOREIGN KEY clause next
+			if !p.is(ForeignToken) {
+				return nil, p.syntaxError()
+			}
+			fkDecl, err := p.parseTableForeignKey()
+			if err != nil {
+				return nil, err
+			}
+			cDecl.Add(fkDecl)
+			tableDecl.Add(cDecl)
+			continue
+		case CommaToken:
+			// Separator between columns and/or table-level constraints
+			p.index++
+			continue
 		default:
 		}
 
@@ -327,6 +360,31 @@ func (p *parser) parseTable(tokens []Token) (*Decl, error) {
 					return nil, err
 				}
 				newAttribute.Add(dDecl)
+			case ReferencesToken: // REFERENCES table(col)
+				rDecl, err := p.parseReferencesClause()
+				if err != nil {
+					return nil, err
+				}
+				newAttribute.Add(rDecl)
+			case ConstraintToken: // CONSTRAINT name REFERENCES ...
+				cDecl, err := p.consumeToken(ConstraintToken)
+				if err != nil {
+					return nil, err
+				}
+				name, err := p.parseQuotedToken()
+				if err != nil {
+					return nil, err
+				}
+				cDecl.Add(name)
+				if !p.is(ReferencesToken) {
+					return nil, p.syntaxError()
+				}
+				rDecl, err := p.parseReferencesClause()
+				if err != nil {
+					return nil, err
+				}
+				cDecl.Add(rDecl)
+				newAttribute.Add(cDecl)
 			default:
 				// Unknown column constraint
 				return nil, p.syntaxError()
@@ -346,6 +404,86 @@ func (p *parser) parseTable(tokens []Token) (*Decl, error) {
 	}
 
 	return tableDecl, nil
+}
+
+// parseTableForeignKey parses a table-level FOREIGN KEY constraint
+// FOREIGN KEY (col1, col2) REFERENCES schema.table (ref1, ref2)
+func (p *parser) parseTableForeignKey() (*Decl, error) {
+	fkDecl, err := p.consumeToken(ForeignToken)
+	if err != nil {
+		return nil, err
+	}
+	// KEY
+	keyDecl, err := p.consumeToken(KeyToken)
+	if err != nil {
+		return nil, err
+	}
+	fkDecl.Add(keyDecl)
+
+	// ( columns )
+	if _, err := p.consumeToken(BracketOpeningToken); err != nil {
+		return nil, err
+	}
+	for {
+		d, err := p.parseQuotedToken()
+		if err != nil {
+			return nil, err
+		}
+		keyDecl.Add(d)
+		d, err = p.consumeToken(CommaToken, BracketClosingToken)
+		if err != nil {
+			return nil, err
+		}
+		if d.Token == BracketClosingToken {
+			break
+		}
+	}
+
+	// REFERENCES clause
+	rDecl, err := p.parseReferencesClause()
+	if err != nil {
+		return nil, err
+	}
+	fkDecl.Add(rDecl)
+
+	return fkDecl, nil
+}
+
+// parseReferencesClause parses REFERENCES schema.table (col1, col2) with optional schema and column list
+func (p *parser) parseReferencesClause() (*Decl, error) {
+	rDecl, err := p.consumeToken(ReferencesToken)
+	if err != nil {
+		return nil, err
+	}
+	// referenced table name (may be schema-qualified and/or quoted)
+	tbl, err := p.parseTableName()
+	if err != nil {
+		return nil, err
+	}
+	rDecl.Add(tbl)
+
+	// optional ( columns )
+	if p.is(BracketOpeningToken) {
+		if _, err := p.consumeToken(BracketOpeningToken); err != nil {
+			return nil, err
+		}
+		for {
+			d, err := p.parseQuotedToken()
+			if err != nil {
+				return nil, err
+			}
+			rDecl.Add(d)
+			d, err = p.consumeToken(CommaToken, BracketClosingToken)
+			if err != nil {
+				return nil, err
+			}
+			if d.Token == BracketClosingToken {
+				break
+			}
+		}
+	}
+
+	return rDecl, nil
 }
 
 func (p *parser) parseDefaultClause() (*Decl, error) {

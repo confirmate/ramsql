@@ -325,6 +325,74 @@ func (t *Transaction) Delete(schema, relation string, selectors []Selector, p Pr
 		return nil, nil, fmt.Errorf("could not find selector node")
 	}
 
+	// Pre-check RESTRICT: evaluate target rows on a separate, fresh plan to avoid consuming the main plan
+	n2preview, err := t.Plan(schema, selectors, p, nil, nil)
+	if err != nil {
+		return nil, nil, t.abort(err)
+	}
+	sn2, ok2 := n2preview.(*SelectorNode)
+	if !ok2 {
+		return nil, nil, t.abort(fmt.Errorf("could not find selector node in preview"))
+	}
+	_, candidates, err := sn2.child.Exec()
+	if err != nil {
+		return nil, nil, t.abort(err)
+	}
+
+	// For each candidate tuple, ensure no referencing rows exist in any relation
+	for _, e := range candidates {
+		tup := e.Value.(*Tuple)
+
+		// iterate all schemas and relations to find FKs referencing schema.relation
+		for schName, sch := range t.e.schemas {
+			// skip information_schema
+			for childName, childRel := range sch.relations {
+				for _, at := range childRel.attributes {
+					if at.fk == nil {
+						continue
+					}
+					refSchema := at.fk.RefSchema()
+					if refSchema == "" {
+						refSchema = schName // referencing default schema is child's schema? If empty, assume same as child schema; default to current schema if needed
+					}
+					if refSchema == s.name && at.fk.RefRelation() == relation {
+						// Determine referenced column
+						refCols := at.fk.RefColumns()
+						var refCol string
+						if len(refCols) > 0 {
+							refCol = refCols[0]
+						} else {
+							// use parent PK (single-column only)
+							if len(r.pk) != 1 {
+								return nil, nil, t.abort(fmt.Errorf("delete restrict not supported for composite primary key on %s.%s", s.name, relation))
+							}
+							refCol = r.attributes[r.pk[0]].name
+						}
+						// parent value
+						pidx := r.attrIndex[refCol]
+						pval := tup.values[pidx]
+						if pval == nil {
+							continue
+						}
+						// Build predicate on child: child.at.name = parent value
+						cond := NewEqPredicate(NewAttributeValueFunctor(childName, at.name), NewConstValueFunctor(pval))
+						n2, err := t.Plan(schName, nil, cond, nil, nil)
+						if err != nil {
+							return nil, nil, t.abort(err)
+						}
+						_, rows2, err := n2.Exec()
+						if err != nil {
+							return nil, nil, t.abort(err)
+						}
+						if len(rows2) > 0 {
+							return nil, nil, t.abort(fmt.Errorf("delete violates foreign key: %s.%s is referenced by %s.%s", s.name, relation, schName, childName))
+						}
+					}
+				}
+			}
+		}
+	}
+
 	un := NewDeleterNode(r, t.changes)
 
 	snode.child, un.child = un, snode.child
@@ -374,7 +442,7 @@ func (t *Transaction) Update(schema, relation string, values map[string]any, sel
 		return nil, nil, fmt.Errorf("could not find selector node")
 	}
 
-	un := NewUpdaterNode(r, t.changes, values)
+	un := NewUpdaterNode(schema, r, t, t.changes, values)
 
 	snode.child, un.child = un, snode.child
 
@@ -470,7 +538,50 @@ func (t *Transaction) Insert(schema, relation string, values map[string]any) (*T
 				}
 			}
 			if attr.fk != nil {
-				// TODO: predicate: equal
+				// Child-side FK check for column-level REFERENCES
+				// Skip when value is NULL
+				if val != nil {
+					refSchema := attr.fk.RefSchema()
+					if refSchema == "" {
+						refSchema = schema
+					}
+					refRel := attr.fk.RefRelation()
+
+					// Determine referenced column
+					refCols := attr.fk.RefColumns()
+					var refCol string
+					if len(refCols) > 0 {
+						refCol = refCols[0]
+					} else {
+						// reference parent PK (single-column only for now)
+						ps, err := t.e.schema(refSchema)
+						if err != nil {
+							return nil, t.abort(err)
+						}
+						pr, err := ps.Relation(refRel)
+						if err != nil {
+							return nil, t.abort(err)
+						}
+						if len(pr.pk) != 1 {
+							return nil, t.abort(fmt.Errorf("foreign key on %s.%s references composite/unknown key not supported yet", relation, attr.name))
+						}
+						refCol = pr.attributes[pr.pk[0]].name
+					}
+
+					// Build existence predicate on parent
+					p := NewEqPredicate(NewAttributeValueFunctor(refRel, refCol), NewConstValueFunctor(val))
+					n, err := t.Plan(refSchema, nil, p, nil, nil)
+					if err != nil {
+						return nil, t.abort(err)
+					}
+					_, rows, err := n.Exec()
+					if err != nil {
+						return nil, t.abort(err)
+					}
+					if len(rows) == 0 {
+						return nil, t.abort(fmt.Errorf("insert violates foreign key on %s.%s referencing %s.%s", relation, attr.name, refRel, refCol))
+					}
+				}
 			}
 			tuple.Append(reflect.ValueOf(val).Convert(attr.typeInstance).Interface())
 			delete(values, attr.name)

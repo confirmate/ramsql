@@ -41,16 +41,26 @@ func NewRelation(schema, name string, attributes []Attribute, pk []string) (*Rel
 		r.pk = append(r.pk, r.attrIndex[k])
 	}
 
-	// if primary key is specified, create Hash index
+	// if primary key is specified, create Hash index (deduped)
 	if len(r.pk) != 0 {
-		r.indexes = append(r.indexes, NewHashIndex("pk_"+schema+"_"+name, name, attributes, pk, r.pk))
+		r.ensureHashIndex("pk_", pk)
 	}
 
-	// if unique is specified, create Hash index
-	for i, a := range r.attributes {
+	// if unique is specified, create Hash index (deduped)
+	for _, a := range r.attributes {
 		if a.unique {
-			r.indexes = append(r.indexes, NewHashIndex("unique_"+schema+"_"+name+"_"+a.name, name, attributes, []string{a.name}, []int{i}))
+			r.ensureHashIndex("unique_", []string{a.name})
 		}
+	}
+
+	// Create indexes for foreign key local columns to speed lookups and RESTRICT checks
+	// Derive unique FK groups from attribute metadata.
+	for _, fk := range uniqueRelationFKs(r) {
+		local := fk.LocalColumns()
+		if len(local) == 0 {
+			continue
+		}
+		r.ensureHashIndex("fk_", local)
 	}
 
 	return r, nil
@@ -118,6 +128,51 @@ func (r *Relation) createIndex(name string, t IndexType, attrs []string) error {
 	}
 
 	return fmt.Errorf("unknown index type: %d", t)
+}
+
+// ensureHashIndex creates a hash index on the given attributes if one with the
+// exact same attribute list (and order) does not already exist.
+func (r *Relation) ensureHashIndex(prefix string, attrs []string) {
+	if len(attrs) == 0 {
+		return
+	}
+	if r.hasIndexOn(attrs) {
+		return
+	}
+	// build attribute indexes
+	idxs := make([]int, 0, len(attrs))
+	for _, a := range attrs {
+		i, ok := r.attrIndex[a]
+		if !ok {
+			return // attribute not found, skip
+		}
+		idxs = append(idxs, i)
+	}
+	iname := prefix + r.schema + "_" + r.name + "_" + strings.Join(attrs, "_")
+	r.indexes = append(r.indexes, NewHashIndex(iname, r.name, r.attributes, attrs, idxs))
+}
+
+// hasIndexOn reports whether there is already a hash index on the exact attribute
+// list (same names in the same order).
+func (r *Relation) hasIndexOn(attrs []string) bool {
+	for _, ix := range r.indexes {
+		if hi, ok := ix.(*HashIndex); ok {
+			if len(hi.attrsName) != len(attrs) {
+				continue
+			}
+			match := true
+			for i := range attrs {
+				if hi.attrsName[i] != attrs[i] {
+					match = false
+					break
+				}
+			}
+			if match {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (r *Relation) Truncate() int64 {

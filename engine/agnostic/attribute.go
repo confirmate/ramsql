@@ -11,12 +11,6 @@ import (
 
 type Defaulter func() any
 
-type ForeignKey struct {
-	schema    string
-	relation  string
-	attribute string
-}
-
 // Domain is the set of allowable values for an Attribute.
 type Domain struct {
 }
@@ -81,6 +75,28 @@ func (a Attribute) WithDefaultNow() Attribute {
 func (a Attribute) WithUnique() Attribute {
 	a.unique = true
 	return a
+}
+
+func (a Attribute) WithForeignKey(schema, relation, attribute string) Attribute {
+	a.fk = &ForeignKey{
+		refSchema:    schema,
+		refRelation:  relation,
+		localColumns: []string{a.name},
+		refColumns:   []string{attribute},
+	}
+	return a
+}
+
+// WithForeignKeyStruct attaches a full foreign key definition to this attribute.
+// Useful for distributing table-level (composite) foreign keys across attributes.
+func (a Attribute) WithForeignKeyStruct(fk ForeignKey) Attribute {
+	// store a copy; dedup/grouping is done by signature at usage sites
+	a.fk = &fk
+	return a
+}
+
+func (a Attribute) ForeignKey() *ForeignKey {
+	return a.fk
 }
 
 func (a Attribute) Name() string {

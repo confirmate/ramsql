@@ -701,7 +701,7 @@ func (s *ConstSelector) Select(cols []string, in []*list.Element) (out []*Tuple,
 		out = append(out, t)
 		return
 	}
-	
+
 	// Otherwise, return the constant value for each input row
 	for range in {
 		t := NewTuple(s.value)
@@ -2031,6 +2031,7 @@ func greater(vl, vr any) (bool, error) {
 
 type Updater struct {
 	rel        string
+	schema     string
 	rows       *list.List
 	changes    *list.List
 	values     map[string]any
@@ -2038,16 +2039,22 @@ type Updater struct {
 	child      Node
 	attributes []Attribute
 	indexes    []Index
+	txn        *Transaction
 }
 
-func NewUpdaterNode(relation *Relation, changes *list.List, values map[string]any) *Updater {
+func NewUpdaterNode(schema string, relation *Relation, txn *Transaction, changes *list.List, values map[string]any) *Updater {
+	if schema == "" {
+		schema = DefaultSchema
+	}
 	u := &Updater{
 		rel:        relation.name,
+		schema:     schema,
 		rows:       relation.rows,
 		changes:    changes,
 		values:     values,
 		attributes: relation.attributes,
 		indexes:    relation.indexes,
+		txn:        txn,
 	}
 
 	for k := range values {
@@ -2068,6 +2075,166 @@ func (u *Updater) EstimateCardinal() int64 {
 	return u.child.EstimateCardinal()
 }
 
+// fieldChange tracks an old/new value for an updated attribute name
+type fieldChange struct {
+	old any
+	new any
+}
+
+// buildNewTupleAndChanges constructs the new tuple for an update and records per-attribute changes.
+// It also performs type conversion and mutates u.values by deleting consumed keys to keep
+// the unknown-attribute check at the end of Exec intact.
+func (u *Updater) buildNewTupleAndChanges(src *Tuple, cols []string) (*Tuple, map[string]fieldChange, error) {
+	newt := &Tuple{values: make([]any, len(src.values))}
+	changed := make(map[string]fieldChange)
+
+	for i, v := range src.values {
+		nv := v
+		attr := u.attributes[i]
+		if val, ok := u.values[cols[i]]; ok {
+			if val == nil {
+				newt.values[i] = nil
+				delete(u.values, cols[i])
+				// record change if old wasn't nil
+				if v != nil {
+					changed[attr.name] = fieldChange{old: v, new: nil}
+				}
+				continue
+			}
+			tof := reflect.TypeOf(val)
+			if !tof.ConvertibleTo(attr.typeInstance) {
+				return nil, nil, fmt.Errorf("cannot assign '%v' (type %s) to %s.%s (type %s)", val, tof, u.rel, attr.name, attr.typeInstance)
+			}
+			nv = reflect.ValueOf(val).Convert(attr.typeInstance).Interface()
+			log.Debug("Updating %s to %v", attr.name, nv)
+		}
+
+		newt.values[i] = nv
+		delete(u.values, cols[i])
+
+		if !reflect.DeepEqual(nv, v) {
+			changed[attr.name] = fieldChange{old: v, new: nv}
+		}
+	}
+
+	return newt, changed, nil
+}
+
+// enforceParentRestrictOnUpdate prevents updates that would modify parent key columns
+// referenced by child rows (RESTRICT behavior). It scans all relations for references
+// to u.schema.u.rel and checks both column-level and relation-level FKs.
+func (u *Updater) enforceParentRestrictOnUpdate(changed map[string]fieldChange, original *Tuple) error {
+	if len(changed) == 0 {
+		return nil
+	}
+
+	for schName, sch := range u.txn.e.schemas {
+		for childName, childRel := range sch.relations {
+			// Column-level FKs
+			for _, at := range childRel.attributes {
+				if at.fk == nil {
+					continue
+				}
+				refSchema := at.fk.RefSchema()
+				if refSchema == "" {
+					refSchema = schName
+				}
+				if refSchema != u.schema || at.fk.RefRelation() != u.rel {
+					continue
+				}
+				// Resolve referenced column
+				refCols := at.fk.RefColumns()
+				var refCol string
+				if len(refCols) > 0 {
+					refCol = refCols[0]
+				} else {
+					// parent PK single-column only
+					ps, err := u.txn.e.schema(u.schema)
+					if err != nil {
+						return err
+					}
+					pr, err := ps.Relation(u.rel)
+					if err != nil {
+						return err
+					}
+					if len(pr.pk) != 1 {
+						return fmt.Errorf("update restrict not supported for composite primary key on %s.%s", u.schema, u.rel)
+					}
+					refCol = pr.attributes[pr.pk[0]].name
+				}
+				// If referenced column isn't being changed, skip
+				ch, ok := changed[refCol]
+				if !ok {
+					continue
+				}
+				// Direct scan on child relation: child.at.name == old parent value
+				cidx := childRel.attrIndex[at.name]
+				for ce := childRel.rows.Front(); ce != nil; ce = ce.Next() {
+					cv := ce.Value.(*Tuple).values[cidx]
+					if ok, _ := equal(cv, ch.old); ok {
+						return fmt.Errorf("update violates foreign key: %s.%s is referenced by %s.%s", u.rel, refCol, schName, childName)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// enforceChildFKs validates that the updated tuple still satisfies child-side FK constraints
+// (both attribute-level and relation-level). It uses the planner to check existence on
+// referenced relations when needed.
+func (u *Updater) enforceChildFKs(newt *Tuple, cols []string) error {
+	for i, attr := range u.attributes {
+		if attr.fk == nil {
+			continue
+		}
+		// if the column changed to nil, skip; else ensure referenced exists
+		val := newt.values[i]
+		if val == nil {
+			continue
+		}
+		refSchema := attr.fk.RefSchema()
+		if refSchema == "" {
+			refSchema = u.schema
+		}
+		refRel := attr.fk.RefRelation()
+		refCols := attr.fk.RefColumns()
+		var refCol string
+		if len(refCols) > 0 {
+			refCol = refCols[0]
+		} else {
+			// parent PK single-column only
+			ps, err := u.txn.e.schema(refSchema)
+			if err != nil {
+				return err
+			}
+			pr, err := ps.Relation(refRel)
+			if err != nil {
+				return err
+			}
+			if len(pr.pk) != 1 {
+				return fmt.Errorf("foreign key on %s.%s references composite/unknown key not supported yet", u.rel, attr.name)
+			}
+			refCol = pr.attributes[pr.pk[0]].name
+		}
+		p := NewEqPredicate(NewAttributeValueFunctor(refRel, refCol), NewConstValueFunctor(val))
+		n, err := u.txn.Plan(refSchema, nil, p, nil, nil)
+		if err != nil {
+			return err
+		}
+		_, rows, err := n.Exec()
+		if err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			return fmt.Errorf("update violates foreign key: %s.%s references %s.%s", u.rel, attr.name, refRel, refCol)
+		}
+	}
+
+	return nil
+}
+
 func (u *Updater) Exec() (cols []string, out []*list.Element, err error) {
 	var in []*list.Element
 
@@ -2079,29 +2246,17 @@ func (u *Updater) Exec() (cols []string, out []*list.Element, err error) {
 	for _, e := range in {
 		t := e.Value.(*Tuple)
 
-		newt := &Tuple{
-			values: make([]any, len(t.values)),
+		newt, changed, err := u.buildNewTupleAndChanges(t, cols)
+		if err != nil {
+			return nil, nil, err
 		}
 
-		for i, v := range t.values {
-			nv := v
-			attr := u.attributes[i]
-			if val, ok := u.values[cols[i]]; ok {
-				if val == nil {
-					newt.values[i] = nil
-					delete(u.values, cols[i])
-					continue
-				}
-				tof := reflect.TypeOf(val)
-				if !tof.ConvertibleTo(attr.typeInstance) {
-					return nil, nil, fmt.Errorf("cannot assign '%v' (type %s) to %s.%s (type %s)", val, tof, u.rel, attr.name, attr.typeInstance)
-				}
-				nv = reflect.ValueOf(val).Convert(attr.typeInstance).Interface()
-				log.Debug("Updating %s to %v", attr.name, nv)
-			}
+		if err := u.enforceParentRestrictOnUpdate(changed, t); err != nil {
+			return nil, nil, err
+		}
 
-			newt.values[i] = nv
-			delete(u.values, cols[i])
+		if err := u.enforceChildFKs(newt, cols); err != nil {
+			return nil, nil, err
 		}
 
 		newe := u.rows.InsertAfter(newt, e)

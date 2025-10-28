@@ -315,18 +315,21 @@ func TestReturning(t *testing.T) {
 	}
 }
 
-/*
-func TestForeignKey(t *testing.T) {
+func TestForeignKeyParsing(t *testing.T) {
 	queries := []string{
+		// column-level REFERENCES
 		`CREATE TABLE pokemon (id BIGSERIAL, name TEXT NOT NULL UNIQUE)`,
-		`CREATE TABLE pokemon_spell (id BIGINT, name VARCHAR(255), pokemon_id BIGINT REFERENCE pokemon(id))`,
+		`CREATE TABLE pokemon_spell (id BIGINT, name VARCHAR(255), pokemon_id BIGINT REFERENCES pokemon(id))`,
+		// table-level FOREIGN KEY
+		`CREATE TABLE memberships (user_id BIGINT, project_id BIGINT, FOREIGN KEY (user_id) REFERENCES users(id))`,
+		// table-level with CONSTRAINT name
+		`CREATE TABLE memberships2 (user_id BIGINT, project_id BIGINT, CONSTRAINT memberships_user_fkey FOREIGN KEY (user_id) REFERENCES users(id))`,
 	}
 
 	for _, q := range queries {
 		parse(q, 1, t)
 	}
 }
-*/
 
 func TestSchema(t *testing.T) {
 	queries := []string{
