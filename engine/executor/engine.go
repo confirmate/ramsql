@@ -534,7 +534,8 @@ func selectExecutor(t *Tx, selectDecl *parser.Decl, args []NamedValue) (int64, i
 			selectDecl.Decl[i].Token != parser.NumberToken &&
 			selectDecl.Decl[i].Token != parser.SimpleQuoteToken &&
 			selectDecl.Decl[i].Token != parser.TrueToken &&
-			selectDecl.Decl[i].Token != parser.FalseToken {
+			selectDecl.Decl[i].Token != parser.FalseToken &&
+			selectDecl.Decl[i].Token != parser.CurrentSchemaToken {
 			continue
 		}
 		// get attribute to select

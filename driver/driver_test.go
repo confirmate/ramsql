@@ -2896,3 +2896,48 @@ func TestSelectWithoutFromInvalidColumn(t *testing.T) {
 	// Just verify we get an error, not a panic
 	t.Logf("Got expected error: %s", errMsg)
 }
+
+func TestCurrentSchema(t *testing.T) {
+
+	db, err := sql.Open("ramsql", "TestCurrentSchema")
+	if err != nil {
+		t.Fatalf("sql.Open: %s", err)
+	}
+	defer db.Close()
+
+	// Test CURRENT_SCHEMA() without FROM clause
+	var schema string
+	err = db.QueryRow("SELECT CURRENT_SCHEMA()").Scan(&schema)
+	if err != nil {
+		t.Fatalf("SELECT CURRENT_SCHEMA(): %s", err)
+	}
+
+	// Should return the default schema name "public"
+	if schema != "public" {
+		t.Errorf("expected schema 'public', got '%s'", schema)
+	}
+
+	// Test CURRENT_SCHEMA() in WHERE clause (original bug report scenario)
+	// This was causing a crash before the fix
+	_, err = db.Exec(`CREATE TABLE test_table (id INT, name TEXT)`)
+	if err != nil {
+		t.Fatalf("CREATE TABLE: %s", err)
+	}
+
+	_, err = db.Exec(`INSERT INTO test_table (id, name) VALUES (1, 'test')`)
+	if err != nil {
+		t.Fatalf("INSERT: %s", err)
+	}
+
+	// Query with CURRENT_SCHEMA() in WHERE clause using parameters
+	// This tests the original bug scenario from information_schema queries
+	var count int
+	err = db.QueryRow(`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = $1`, "test_table").Scan(&count)
+	if err != nil {
+		t.Fatalf("SELECT with CURRENT_SCHEMA() in WHERE: %s", err)
+	}
+
+	if count != 1 {
+		t.Errorf("expected 1 table, got %d", count)
+	}
+}

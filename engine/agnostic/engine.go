@@ -12,6 +12,10 @@ const (
 type Engine struct {
 	schemas map[string]*Schema
 
+	// searchPath holds the schema search path, with the first schema being the current schema
+	// This is used by CURRENT_SCHEMA() to return the first schema in the search path
+	searchPath []string
+
 	sync.Mutex
 }
 
@@ -21,6 +25,9 @@ func NewEngine() *Engine {
 	// create public schema
 	e.schemas = make(map[string]*Schema)
 	e.schemas[DefaultSchema] = NewSchema(DefaultSchema)
+
+	// initialize search_path with default schema
+	e.searchPath = []string{DefaultSchema}
 
 	// create information_schema with a 'tables' relation used by clients (e.g. GORM)
 	info := NewSchema("information_schema")
@@ -108,4 +115,13 @@ func (e *Engine) dropSchema(name string) (*Schema, error) {
 
 	delete(e.schemas, name)
 	return s, nil
+}
+
+// CurrentSchema returns the first schema in the search path
+// This implements the CURRENT_SCHEMA() function behavior
+func (e *Engine) CurrentSchema() string {
+	if len(e.searchPath) == 0 {
+		return DefaultSchema
+	}
+	return e.searchPath[0]
 }
