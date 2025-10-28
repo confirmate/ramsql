@@ -23,3 +23,5 @@ _testmain.go
 *.exe
 examples/
 newbench.txt
+coverage.out
+

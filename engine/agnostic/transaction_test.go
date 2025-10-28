@@ -70,8 +70,9 @@ func TestCreateRelation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot commit tx: %s", err)
 	}
-	if changed != 1 {
-		t.Fatalf("expected 1 change, got %d", changed)
+	// 2 changes: 1 for relation creation + 1 for information_schema.tables insert
+	if changed != 2 {
+		t.Fatalf("expected 2 changes, got %d", changed)
 	}
 
 	if len(e.schemas[DefaultSchema].relations) != 1 {
@@ -119,8 +120,9 @@ func TestDropRelation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot commit tx: %s", err)
 	}
-	if changed != 2 {
-		t.Fatalf("expected 2 change, got %d", changed)
+	// 4 changes: 1 for relation creation + 1 for information_schema insert + 1 for drop + 1 for information_schema delete
+	if changed != 4 {
+		t.Fatalf("expected 4 changes, got %d", changed)
 	}
 
 	if len(e.schemas[DefaultSchema].relations) != 0 {
@@ -453,8 +455,9 @@ func TestIndexCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot commit tx: %s", err)
 	}
-	if changed != 4 {
-		t.Fatalf("expected 4 change, got %d", changed)
+	// 5 changes: 1 for relation creation + 1 for information_schema insert + 3 for row inserts
+	if changed != 5 {
+		t.Fatalf("expected 5 changes, got %d", changed)
 	}
 
 	l := e.schemas[schema].relations[relation].rows.Len()

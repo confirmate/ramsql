@@ -1,9 +1,9 @@
 # RamSQL
 
 [![Build Status](https://travis-ci.org/proullon/ramsql.svg)](https://travis-ci.org/proullon/ramsql)
+[![Go Tests](https://github.com/confirmate/ramsql/actions/workflows/go.yml/badge.svg)](https://github.com/confirmate/ramsql/actions/workflows/go.yml)
 
 ## Disposable SQL engine
-
 RamSQL has been written to be used in your project's test suite.
 
 Unit testing in Go is simple, create a foo_test.go import testing and run `go test ./...`.
