@@ -206,12 +206,12 @@ func (t *Tx) getSelector(attr *parser.Decl, schema string, tables []string, alia
 			}
 			return agnostic.NewAttributeSelector(attr.Decl[0].Lexeme, []string{attribute}), nil
 		}
-		
+
 		// If no tables provided (SELECT without FROM), column doesn't exist
 		if len(tables) == 0 {
 			return nil, fmt.Errorf("column \"%s\" does not exist", attribute)
 		}
-		
+
 		for _, table := range tables {
 			_, _, err = t.tx.RelationAttribute(schema, getAlias(table, aliases), attribute)
 			if err == nil {

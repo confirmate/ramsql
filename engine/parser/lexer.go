@@ -30,6 +30,9 @@ const (
 	EqualityToken
 	DistinctnessToken
 	PeriodToken
+	PlusToken
+	MinusToken
+	DivideToken
 
 	// First order Token
 
@@ -222,6 +225,10 @@ func (l *lexer) lex(instruction []byte) ([]Token, error) {
 	matchers = append(matchers, l.MatchEscapedStringToken)
 	matchers = append(matchers, l.MatchDateToken)
 	matchers = append(matchers, l.MatchNumberToken)
+	// Arithmetic operators (after number matcher so negative numbers work)
+	matchers = append(matchers, l.genericByteMatcher('+', PlusToken))
+	matchers = append(matchers, l.genericByteMatcher('-', MinusToken))
+	matchers = append(matchers, l.genericByteMatcher('/', DivideToken))
 	matchers = append(matchers, l.MatchStringToken)
 
 	var r bool
@@ -424,7 +431,20 @@ func (l *lexer) MatchFloatToken() bool {
 func (l *lexer) MatchNumberToken() bool {
 
 	i := l.pos
-	for i < l.instructionLen && (unicode.IsDigit(rune(l.instruction[i])) || l.instruction[i] == '-') {
+
+	// Optional leading minus sign
+	if i < l.instructionLen && l.instruction[i] == '-' {
+		i++
+	}
+
+	// Must have at least one digit after the (optional) minus
+	if i >= l.instructionLen || !unicode.IsDigit(rune(l.instruction[i])) {
+		// No digits found, not a number
+		return false
+	}
+
+	// Consume all remaining digits
+	for i < l.instructionLen && unicode.IsDigit(rune(l.instruction[i])) {
 		i++
 	}
 
@@ -628,9 +648,10 @@ func (l *lexer) Match(str []byte, token int) bool {
 	}
 
 	// if next character is still a string, it means it doesn't match
-	// ie: COUNT shoulnd match COUNTRY
+	// ie: COUNT shouldn't match COUNTRY, and table shouldn't match table1
 	if l.instructionLen > l.pos+len(str) {
 		if unicode.IsLetter(rune(l.instruction[l.pos+len(str)])) ||
+			unicode.IsDigit(rune(l.instruction[l.pos+len(str)])) ||
 			l.instruction[l.pos+len(str)] == '_' {
 			return false
 		}

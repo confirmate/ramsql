@@ -621,6 +621,55 @@ func (p *parser) parseValue() (*Decl, error) {
 	return valueDecl, nil
 }
 
+// parseExpression handles arithmetic and comparison expressions
+// This is used by both SELECT and WHERE clauses to parse expressions like:
+// - Arithmetic: price * quantity, age + 5, total - discount
+// - Comparison: status = 'active', price > 100
+func (p *parser) parseExpression(leftDecl *Decl) (*Decl, error) {
+	// Check for arithmetic operators first (*, +, -, /)
+	// Note: Arithmetic operators have higher precedence than comparison operators
+	if p.is(StarToken, PlusToken, MinusToken, DivideToken) {
+		operatorDecl, err := p.consumeToken(p.cur().Token)
+		if err != nil {
+			return nil, err
+		}
+		leftDecl.Add(operatorDecl)
+
+		// Parse right side of arithmetic expression
+		var rightDecl *Decl
+		if p.is(NumberToken) {
+			rightDecl, err = p.consumeToken(NumberToken)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			rightDecl, err = p.parseAttribute()
+			if err != nil {
+				return nil, err
+			}
+		}
+		leftDecl.Add(rightDecl)
+	}
+
+	// Check for comparison operators (=, <>, <, >, <=, >=)
+	if p.is(EqualityToken, DistinctnessToken, LeftDipleToken, RightDipleToken, LessOrEqualToken, GreaterOrEqualToken) {
+		operatorDecl, err := p.consumeToken(p.cur().Token)
+		if err != nil {
+			return nil, err
+		}
+		leftDecl.Add(operatorDecl)
+
+		// Parse right side value
+		valueDecl, err := p.parseValue()
+		if err != nil {
+			return nil, err
+		}
+		leftDecl.Add(valueDecl)
+	}
+
+	return leftDecl, nil
+}
+
 func (p *parser) parseStringLiteral() (*Decl, error) {
 	singleQuoted := p.is(SimpleQuoteToken)
 	_, err := p.consumeToken(SimpleQuoteToken, DoubleQuoteToken)

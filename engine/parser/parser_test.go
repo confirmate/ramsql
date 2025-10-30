@@ -385,6 +385,49 @@ func TestArguments(t *testing.T) {
 	}
 }
 
+func TestSelectArithmeticExpressions(t *testing.T) {
+	// Test arithmetic operators in SELECT clause
+	queries := []string{
+		`SELECT 8 * price FROM products`,
+		`SELECT id, price * 2 FROM products`,
+		`SELECT id, price * quantity, name FROM orders`,
+		`SELECT quantity + 10 FROM inventory`,
+		`SELECT total - discount FROM invoices`,
+		`SELECT amount / rate FROM conversions`,
+	}
+
+	for _, q := range queries {
+		parse(q, 1, t)
+	}
+}
+
+func TestSelectComparisonExpressions(t *testing.T) {
+	// Test comparison operators in SELECT clause (boolean expressions)
+	queries := []string{
+		`SELECT id, status = 'active' FROM users`,
+		`SELECT name, price > 100 FROM products`,
+		`SELECT id, age >= 18 FROM people`,
+		`SELECT title, views < 1000 FROM posts`,
+		`SELECT id, category <> 'archived' FROM items`,
+	}
+
+	for _, q := range queries {
+		parse(q, 1, t)
+	}
+}
+
+func TestSelectMixedExpressions(t *testing.T) {
+	// Test mixing regular columns with expressions
+	queries := []string{
+		`SELECT id, name, price * 2, status = 'active' FROM products WHERE id > 0`,
+		`SELECT user_id, score + bonus, rank <= 10 FROM leaderboard`,
+	}
+
+	for _, q := range queries {
+		parse(q, 1, t)
+	}
+}
+
 func parse(query string, instructionNumber int, t *testing.T) []Instruction {
 
 	parser := parser{}

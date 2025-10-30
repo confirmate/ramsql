@@ -95,6 +95,32 @@ func (p *parser) parseCondition() (*Decl, error) {
 		return nil, err
 	}
 
+	// Check for arithmetic operators first (*, +, -, /)
+	// This allows expressions like: WHERE price * quantity > 1000
+	if p.is(StarToken, PlusToken, MinusToken, DivideToken) {
+		operatorDecl, err := p.consumeToken(p.cur().Token)
+		if err != nil {
+			return nil, err
+		}
+		attributeDecl.Add(operatorDecl)
+
+		// Parse right side of arithmetic expression
+		var rightDecl *Decl
+		if p.is(NumberToken) {
+			rightDecl, err = p.consumeToken(NumberToken)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			rightDecl, err = p.parseAttribute()
+			if err != nil {
+				return nil, err
+			}
+		}
+		attributeDecl.Add(rightDecl)
+	}
+
+	// Now check for comparison and special WHERE operators
 	switch p.cur().Token {
 	case EqualityToken, DistinctnessToken, LeftDipleToken, RightDipleToken, LessOrEqualToken, GreaterOrEqualToken:
 		decl, err := p.consumeToken(p.cur().Token)
