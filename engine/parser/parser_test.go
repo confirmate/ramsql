@@ -267,8 +267,13 @@ func TestUnique(t *testing.T) {
 
 func TestAlias(t *testing.T) {
 	queries := []string{
+		// Explicit aliases with AS keyword
 		`SELECT p.test FROM probably_too_long_name AS p WHERE p.id = $1`,
 		`SELECT p.test FROM machin JOIN probably_too_long_name AS p ON p.id = machin.id`,
+		// Implicit aliases without AS keyword
+		`SELECT o.order_no FROM orders o WHERE o.id = 1`,
+		`SELECT o.order_no FROM orders o JOIN order_details od ON o.id = od.order_id`,
+		`SELECT o.order_no, p.name FROM orders o JOIN order_details od ON o.id = od.order_id JOIN products p ON od.product_id = p.id`,
 	}
 
 	for _, q := range queries {
