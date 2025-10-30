@@ -3282,3 +3282,41 @@ func TestSchemaQualifiedSelects(t *testing.T) {
 		t.Fatalf("expected 'Widget' with alias, got %q", name)
 	}
 }
+
+type MyInt int32
+
+func TestTypeAliasInsert(t *testing.T) {
+	log.SetLevel(log.DebugLevel)
+
+	db, err := sql.Open("ramsql", "TestTypeAliasInsert")
+	if err != nil {
+		t.Fatalf("cannot open db: %s", err)
+	}
+	defer db.Close()
+
+	// Create table with INT column
+	_, err = db.Exec(`CREATE TABLE test_table (id BIGSERIAL PRIMARY KEY, value INT)`)
+	if err != nil {
+		t.Fatalf("cannot create table: %s", err)
+	}
+
+	// Try to insert with a type alias
+	var myValue MyInt = 100
+	_, err = db.Exec(`INSERT INTO test_table (value) VALUES ($1)`, myValue)
+	if err != nil {
+		t.Fatalf("cannot insert: %s", err)
+	}
+
+	// Try to read it back
+	var readValue int32
+	err = db.QueryRow(`SELECT value FROM test_table WHERE id = 1`).Scan(&readValue)
+	if err != nil {
+		t.Fatalf("cannot select: %s", err)
+	}
+
+	fmt.Printf("Inserted: %v (%T), Read: %v (%T)\n", myValue, myValue, readValue, readValue)
+
+	if readValue != 100 {
+		t.Fatalf("expected 100, got %d", readValue)
+	}
+}
