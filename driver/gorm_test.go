@@ -11,7 +11,7 @@ import (
 type Product struct {
 	gorm.Model
 	Code       string
-	Price      uint
+	Price      int32
 	TestBigint uint64 `gorm:"test_bigint;type:BIGINT UNSIGNED AUTO_INCREMENT"`
 }
 
