@@ -66,15 +66,19 @@ func (p *parser) parseSelect(tokens []Token) (*Instruction, error) {
 			selectDecl.Add(attrDecl)
 			needsNext = true
 		case p.is(NumberToken):
-			// Handle CURRENT_DATABASE() function
+			// Handle literal numbers in SELECT clause (may be part of arithmetic expression)
 			attrDecl := NewDecl(p.cur())
+			if err := p.next(); err != nil {
+				selectDecl.Add(attrDecl)
+				break
+			}
+			// Check for arithmetic operators
+			attrDecl, err = p.parseExpression(attrDecl)
+			if err != nil {
+				return nil, err
+			}
 			selectDecl.Add(attrDecl)
-			needsNext = true
-		case p.is(NumberToken):
-			// Handle literal numbers in SELECT clause
-			attrDecl := NewDecl(p.cur())
-			selectDecl.Add(attrDecl)
-			needsNext = true // We need to advance since we didn't call parseAttribute
+			needsNext = false
 		case p.is(SimpleQuoteToken):
 			// Handle quoted string literals in SELECT clause
 			if err := p.next(); err != nil {
@@ -106,6 +110,13 @@ func (p *parser) parseSelect(tokens []Token) (*Instruction, error) {
 			if err != nil {
 				return nil, err
 			}
+
+			// Check if this attribute is part of an expression
+			attrDecl, err = p.parseExpression(attrDecl)
+			if err != nil {
+				return nil, err
+			}
+
 			if distinctOpen {
 				distinctDecl.Add(attrDecl)
 			} else {
