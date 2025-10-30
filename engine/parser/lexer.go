@@ -51,6 +51,7 @@ const (
 	TableToken
 	SchemaToken
 	CurrentSchemaToken
+	CurrentDatabaseToken
 	IntoToken
 	ValuesToken
 	JoinToken
@@ -166,6 +167,8 @@ func (l *lexer) lex(instruction []byte) ([]Token, error) {
 	matchers = append(matchers, l.genericStringMatcher("distinct", DistinctToken))
 	// Second order Matcher
 	matchers = append(matchers, l.genericStringMatcher("table", TableToken))
+	matchers = append(matchers, l.genericStringMatcher("current_database()", CurrentDatabaseToken))
+	matchers = append(matchers, l.genericStringMatcher("current_database", CurrentDatabaseToken))
 	matchers = append(matchers, l.genericStringMatcher("current_schema()", CurrentSchemaToken))
 	matchers = append(matchers, l.genericStringMatcher("current_schema", CurrentSchemaToken))
 	matchers = append(matchers, l.genericStringMatcher("schema", SchemaToken))

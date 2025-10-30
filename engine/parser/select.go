@@ -60,6 +60,16 @@ func (p *parser) parseSelect(tokens []Token) (*Instruction, error) {
 			attrDecl := NewDecl(p.cur())
 			selectDecl.Add(attrDecl)
 			needsNext = true
+		case p.is(CurrentDatabaseToken):
+			// Handle CURRENT_DATABASE() function
+			attrDecl := NewDecl(p.cur())
+			selectDecl.Add(attrDecl)
+			needsNext = true
+		case p.is(NumberToken):
+			// Handle CURRENT_DATABASE() function
+			attrDecl := NewDecl(p.cur())
+			selectDecl.Add(attrDecl)
+			needsNext = true
 		case p.is(NumberToken):
 			// Handle literal numbers in SELECT clause
 			attrDecl := NewDecl(p.cur())

@@ -144,6 +144,13 @@ func (t *Tx) getSelector(attr *parser.Decl, schema string, tables []string, alia
 			relation = tables[0]
 		}
 		return agnostic.NewConstSelector(relation, t.tx.Engine().CurrentSchema()), nil
+	case parser.CurrentDatabaseToken:
+		// Handle CURRENT_DATABASE() function
+		relation := ""
+		if len(tables) > 0 {
+			relation = tables[0]
+		}
+		return agnostic.NewConstSelector(relation, t.e.dbName), nil
 	case parser.NumberToken:
 		// Handle literal numbers (e.g., SELECT 1)
 		relation := ""

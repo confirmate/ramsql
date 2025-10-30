@@ -17,13 +17,20 @@ import (
 // Engine is the root struct of RamSQL server
 type Engine struct {
 	memstore *agnostic.Engine
+	dbName   string
 }
 
 // New initialize a new RamSQL server
 func NewEngine() (e *Engine, err error) {
+	return NewEngineWithName("")
+}
+
+// NewEngineWithName initialize a new RamSQL server with a database name
+func NewEngineWithName(dbName string) (e *Engine, err error) {
 
 	e = &Engine{
 		memstore: agnostic.NewEngine(),
+		dbName:   dbName,
 	}
 
 	return
@@ -637,7 +644,8 @@ func selectExecutor(t *Tx, selectDecl *parser.Decl, args []NamedValue) (int64, i
 			selectDecl.Decl[i].Token != parser.SimpleQuoteToken &&
 			selectDecl.Decl[i].Token != parser.TrueToken &&
 			selectDecl.Decl[i].Token != parser.FalseToken &&
-			selectDecl.Decl[i].Token != parser.CurrentSchemaToken {
+			selectDecl.Decl[i].Token != parser.CurrentSchemaToken &&
+			selectDecl.Decl[i].Token != parser.CurrentDatabaseToken {
 			continue
 		}
 		// get attribute to select
