@@ -253,7 +253,8 @@ func (p *parser) parseSelect(tokens []Token) (*Instruction, error) {
 				return nil, err
 			}
 			selectDecl.Add(limitDecl)
-			numDecl, err := p.consumeToken(NumberToken)
+			// LIMIT can be a number or a parameter ($1, ?, :name)
+			numDecl, err := p.consumeToken(NumberToken, ArgToken, NamedArgToken)
 			if err != nil {
 				return nil, err
 			}
@@ -264,7 +265,8 @@ func (p *parser) parseSelect(tokens []Token) (*Instruction, error) {
 				return nil, err
 			}
 			selectDecl.Add(offsetDecl)
-			offsetValue, err := p.consumeToken(NumberToken)
+			// OFFSET can be a number or a parameter ($1, ?, :name)
+			offsetValue, err := p.consumeToken(NumberToken, ArgToken, NamedArgToken)
 			if err != nil {
 				return nil, err
 			}
