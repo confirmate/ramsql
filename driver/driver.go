@@ -54,14 +54,14 @@ func (rs *Driver) Open(dsn string) (conn driver.Conn, err error) {
 	rs.Lock()
 	defer rs.Unlock()
 
-	_, err = parseConnectionURI(dsn)
+	conf, err := parseConnectionURI(dsn)
 	if err != nil {
 		return nil, err
 	}
 
 	dsnengine, exist := rs.engines[dsn]
 	if !exist {
-		e, err := executor.NewEngine()
+		e, err := executor.NewEngineWithName(conf.Db)
 		if err != nil {
 			return nil, err
 		}
