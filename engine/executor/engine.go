@@ -598,7 +598,16 @@ func selectExecutor(t *Tx, selectDecl *parser.Decl, args []NamedValue) (int64, i
 				return 0, 0, nil, nil, err
 			}
 		case parser.JoinToken:
-			j, err := t.getJoin(selectDecl.Decl[i], tables[0])
+			// Capture alias mapping for joined table, if any
+			if len(selectDecl.Decl[i].Decl) > 0 {
+				if tbl, al, ok := extractAliasFromTableDecl(selectDecl.Decl[i].Decl[0]); ok {
+					if aliases == nil {
+						aliases = make(map[string]string)
+					}
+					aliases[al] = tbl
+				}
+			}
+			j, err := t.getJoin(selectDecl.Decl[i], tables[0], aliases)
 			if err != nil {
 				return 0, 0, nil, nil, err
 			}

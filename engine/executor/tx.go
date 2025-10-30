@@ -201,10 +201,9 @@ func (t *Tx) getSelector(attr *parser.Decl, schema string, tables []string, alia
 				return nil, err
 			}
 
-			if attr.Decl[0].Lexeme != a {
-				return agnostic.NewAttributeSelector(a, []string{attribute}, agnostic.WithAlias(attr.Decl[0].Lexeme)), nil
-			}
-			return agnostic.NewAttributeSelector(attr.Decl[0].Lexeme, []string{attribute}), nil
+			// Always select using the resolved relation name (no alias),
+			// to keep internal resolution consistent across joins.
+			return agnostic.NewAttributeSelector(a, []string{attribute}), nil
 		}
 
 		// If no tables provided (SELECT without FROM), column doesn't exist
@@ -235,13 +234,49 @@ func getSelectedTables(fromDecl *parser.Decl) (string, []string, map[string]stri
 		if d, ok := t.Has(parser.SchemaToken); ok {
 			schema = d.Lexeme
 		}
-		if d, ok := t.Has(parser.AsToken); ok {
-			aliases[d.Decl[0].Lexeme] = t.Lexeme
+		
+		// Check if this table has an alias
+		// The alias is added as a child StringToken after the table name
+		tableName := t.Lexeme
+		if len(t.Decl) > 0 {
+			// Check if the last child is a StringToken (alias)
+			lastChild := t.Decl[len(t.Decl)-1]
+			if lastChild.Token == parser.StringToken {
+				// This is an alias
+				aliases[lastChild.Lexeme] = tableName
+			}
 		}
-		tables = append(tables, t.Lexeme)
+		
+		// Legacy check for explicit AS token (kept for compatibility)
+		if d, ok := t.Has(parser.AsToken); ok {
+			if len(d.Decl) > 0 {
+				aliases[d.Decl[0].Lexeme] = tableName
+			}
+		}
+		
+		tables = append(tables, tableName)
 	}
 
 	return schema, tables, aliases
+}
+
+// extractAliasFromTableDecl inspects a table declaration node and returns an alias mapping if present.
+// The parser attaches the alias as a trailing StringToken child of the table name node, e.g.:
+// FROM orders o  => node "orders" with child "o"
+func extractAliasFromTableDecl(t *parser.Decl) (table string, alias string, ok bool) {
+	if t == nil {
+		return "", "", false
+	}
+	table = t.Lexeme
+	if len(t.Decl) == 0 {
+		return "", "", false
+	}
+	last := t.Decl[len(t.Decl)-1]
+	if last.Token == parser.StringToken {
+		alias = last.Lexeme
+		return table, alias, true
+	}
+	return "", "", false
 }
 
 func (t *Tx) getPredicates(decl []*parser.Decl, schema, fromTableName string, args []NamedValue, aliases map[string]string) (agnostic.Predicate, error) {
@@ -465,7 +500,7 @@ func (t *Tx) or(left []*parser.Decl, right []*parser.Decl, schema, tableName str
 	return agnostic.NewOrPredicate(lp, rp), nil
 }
 
-func (t *Tx) getJoin(decl *parser.Decl, leftR string) (agnostic.Joiner, error) {
+func (t *Tx) getJoin(decl *parser.Decl, leftR string, aliases map[string]string) (agnostic.Joiner, error) {
 	var leftA, rightA, rightR string
 
 	if decl.Decl[0].Token != parser.StringToken {
@@ -501,6 +536,9 @@ func (t *Tx) getJoin(decl *parser.Decl, leftR string) (agnostic.Joiner, error) {
 			rightR = on.Decl[0].Decl[0].Lexeme
 		}
 	}
+	// Resolve potential aliases to real table names
+	leftR = getAlias(leftR, aliases)
+	rightR = getAlias(rightR, aliases)
 
 	return agnostic.NewNaturalJoin(leftR, leftA, rightR, rightA), nil
 }

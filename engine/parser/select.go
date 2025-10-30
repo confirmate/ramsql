@@ -176,6 +176,39 @@ func (p *parser) parseSelect(tokens []Token) (*Instruction, error) {
 		}
 		fromDecl.Add(tableNameDecl)
 
+		// Check for optional alias (with or without AS keyword)
+		// Supports: FROM table1 AS t1, FROM table1 t1
+		if !p.hasNext() {
+			addImplicitWhereAll(selectDecl)
+			return i, nil
+		}
+
+		// Check for explicit AS keyword
+		if p.is(AsToken) {
+			if _, err := p.consumeToken(AsToken); err != nil {
+				return nil, err
+			}
+			// Next token should be the alias name
+			if !p.hasNext() {
+				return nil, fmt.Errorf("Expected alias name after AS")
+			}
+			aliasDecl, err := p.consumeToken(StringToken)
+			if err != nil {
+				return nil, fmt.Errorf("Expected alias name after AS: %v", err)
+			}
+			tableNameDecl.Add(aliasDecl)
+		} else if p.is(StringToken) {
+			// Implicit alias (no AS keyword): FROM table1 t1
+			// Only consume if it's not a keyword like WHERE, JOIN, etc.
+			if !p.is(WhereToken, JoinToken, OrderToken, LimitToken, OffsetToken, ForToken, CommaToken) {
+				aliasDecl, err := p.consumeToken(StringToken)
+				if err != nil {
+					return nil, err
+				}
+				tableNameDecl.Add(aliasDecl)
+			}
+		}
+
 		// If no next, then it's implicit where
 		if !p.hasNext() {
 			addImplicitWhereAll(selectDecl)

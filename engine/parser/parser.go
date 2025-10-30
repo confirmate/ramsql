@@ -705,12 +705,19 @@ func (p *parser) parseJoin() (*Decl, error) {
 	}
 	joinDecl.Add(tableDecl)
 
-	// AS SOMETHING ?
+	// AS SOMETHING ? (explicit with AS keyword)
 	if p.is(AsToken) {
 		_, err = p.consumeToken(AsToken)
 		if err != nil {
 			return nil, err
 		}
+		aliasDecl, err := p.consumeToken(StringToken)
+		if err != nil {
+			return nil, err
+		}
+		tableDecl.Add(aliasDecl)
+	} else if p.is(StringToken) && !p.is(OnToken) {
+		// Implicit alias (no AS keyword): JOIN table1 t1 ON ...
 		aliasDecl, err := p.consumeToken(StringToken)
 		if err != nil {
 			return nil, err
