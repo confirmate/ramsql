@@ -168,7 +168,7 @@ func (l *lexer) lex(instruction []byte) ([]Token, error) {
 	// Second order Matcher
 	matchers = append(matchers, l.genericStringMatcher("table", TableToken))
 	matchers = append(matchers, l.genericStringMatcher("current_database()", CurrentDatabaseToken))
-	matchers = append(matchers, l.genericStringMatcher("current_database", CurrentDatabaseToken))
+	matchers = append(matchers, l.genericStringMatcher("current_catalog", CurrentDatabaseToken))
 	matchers = append(matchers, l.genericStringMatcher("current_schema()", CurrentSchemaToken))
 	matchers = append(matchers, l.genericStringMatcher("current_schema", CurrentSchemaToken))
 	matchers = append(matchers, l.genericStringMatcher("schema", SchemaToken))
