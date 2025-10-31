@@ -483,7 +483,74 @@ func (p *parser) parseReferencesClause() (*Decl, error) {
 		}
 	}
 
+	// optional ON DELETE / ON UPDATE clauses
+	if err := p.parseReferenceActions(rDecl); err != nil {
+		return nil, err
+	}
+
 	return rDecl, nil
+}
+
+// parseReferenceActions parses ON DELETE/UPDATE ... clauses for REFERENCES
+func (p *parser) parseReferenceActions(rDecl *Decl) error {
+	for p.is(OnToken) {
+		onDecl, err := p.consumeToken(OnToken)
+		if err != nil {
+			return err
+		}
+		rDecl.Add(onDecl)
+
+		// Should be DELETE or UPDATE
+		actionTypeDecl, err := p.consumeToken(DeleteToken, UpdateToken)
+		if err != nil {
+			return err
+		}
+		onDecl.Add(actionTypeDecl)
+
+		// Should be CASCADE, RESTRICT, SET NULL, SET DEFAULT, or NO ACTION
+		var actionDecl *Decl
+		if p.is(NoToken) {
+			// Handle NO ACTION (two tokens)
+			noDecl, err := p.consumeToken(NoToken)
+			if err != nil {
+				return err
+			}
+			actionToken, err := p.consumeToken(ActionToken)
+			if err != nil {
+				return err
+			}
+			// Combine into a single decl with lexeme "NO ACTION"
+			actionDecl = noDecl
+			actionDecl.Lexeme = "NO ACTION"
+			actionDecl.Add(actionToken)
+		} else if p.is(SetToken) {
+			// Handle SET NULL or SET DEFAULT (two tokens)
+			setDecl, err := p.consumeToken(SetToken)
+			if err != nil {
+				return err
+			}
+			nullOrDefaultDecl, err := p.consumeToken(NullToken, DefaultToken)
+			if err != nil {
+				return err
+			}
+			// Combine into a single decl
+			actionDecl = setDecl
+			if nullOrDefaultDecl.Token == NullToken {
+				actionDecl.Lexeme = "SET NULL"
+			} else {
+				actionDecl.Lexeme = "SET DEFAULT"
+			}
+			actionDecl.Add(nullOrDefaultDecl)
+		} else {
+			// Single token actions: CASCADE or RESTRICT
+			actionDecl, err = p.consumeToken(CascadeToken, RestrictToken)
+			if err != nil {
+				return err
+			}
+		}
+		actionTypeDecl.Add(actionDecl)
+	}
+	return nil
 }
 
 func (p *parser) parseDefaultClause() (*Decl, error) {

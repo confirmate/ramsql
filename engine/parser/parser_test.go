@@ -336,6 +336,30 @@ func TestForeignKeyParsing(t *testing.T) {
 	}
 }
 
+func TestForeignKeyWithOnDelete(t *testing.T) {
+	queries := []string{
+		// column-level REFERENCES with ON DELETE CASCADE
+		`CREATE TABLE pokemon_spell (id BIGINT, pokemon_id BIGINT REFERENCES pokemon(id) ON DELETE CASCADE)`,
+		`CREATE TABLE pokemon_spell (id BIGINT, pokemon_id BIGINT REFERENCES pokemon(id) ON DELETE RESTRICT)`,
+		`CREATE TABLE pokemon_spell (id BIGINT, pokemon_id BIGINT REFERENCES pokemon(id) ON DELETE SET NULL)`,
+		`CREATE TABLE pokemon_spell (id BIGINT, pokemon_id BIGINT REFERENCES pokemon(id) ON DELETE SET DEFAULT)`,
+		`CREATE TABLE pokemon_spell (id BIGINT, pokemon_id BIGINT REFERENCES pokemon(id) ON DELETE NO ACTION)`,
+		// ON UPDATE variants
+		`CREATE TABLE pokemon_spell (id BIGINT, pokemon_id BIGINT REFERENCES pokemon(id) ON UPDATE CASCADE)`,
+		`CREATE TABLE pokemon_spell (id BIGINT, pokemon_id BIGINT REFERENCES pokemon(id) ON UPDATE RESTRICT)`,
+		// Both ON DELETE and ON UPDATE
+		`CREATE TABLE pokemon_spell (id BIGINT, pokemon_id BIGINT REFERENCES pokemon(id) ON DELETE CASCADE ON UPDATE CASCADE)`,
+		`CREATE TABLE pokemon_spell (id BIGINT, pokemon_id BIGINT REFERENCES pokemon(id) ON UPDATE RESTRICT ON DELETE SET NULL)`,
+		// table-level FOREIGN KEY with ON DELETE CASCADE
+		`CREATE TABLE memberships (user_id BIGINT, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)`,
+		`CREATE TABLE memberships (user_id BIGINT, CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE RESTRICT)`,
+	}
+
+	for _, q := range queries {
+		parse(q, 1, t)
+	}
+}
+
 func TestSchema(t *testing.T) {
 	queries := []string{
 		`CREATE SCHEMA foo`,

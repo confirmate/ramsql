@@ -62,6 +62,7 @@ const (
 	OnToken
 	IfToken
 	NotToken
+	NoToken
 	ExistsToken
 	NullToken
 	UnsignedToken
@@ -95,6 +96,9 @@ const (
 	ForeignToken
 	ReferencesToken
 	ConstraintToken
+	CascadeToken
+	RestrictToken
+	ActionToken
 
 	// Type Token
 
@@ -184,6 +188,7 @@ func (l *lexer) lex(instruction []byte) ([]Token, error) {
 	matchers = append(matchers, l.genericStringMatcher("on", OnToken))
 	matchers = append(matchers, l.genericStringMatcher("if", IfToken))
 	matchers = append(matchers, l.genericStringMatcher("not", NotToken))
+	matchers = append(matchers, l.genericStringMatcher("no", NoToken))
 	matchers = append(matchers, l.genericStringMatcher("exists", ExistsToken))
 	matchers = append(matchers, l.genericStringMatcher("null", NullToken))
 	matchers = append(matchers, l.MatchAutoincrementToken)
@@ -218,6 +223,9 @@ func (l *lexer) lex(instruction []byte) ([]Token, error) {
 	matchers = append(matchers, l.genericStringMatcher("foreign", ForeignToken))
 	matchers = append(matchers, l.genericStringMatcher("references", ReferencesToken))
 	matchers = append(matchers, l.genericStringMatcher("constraint", ConstraintToken))
+	matchers = append(matchers, l.genericStringMatcher("cascade", CascadeToken))
+	matchers = append(matchers, l.genericStringMatcher("restrict", RestrictToken))
+	matchers = append(matchers, l.genericStringMatcher("action", ActionToken))
 	// Type Matcher
 	matchers = append(matchers, l.genericStringMatcher("decimal", DecimalToken))
 	matchers = append(matchers, l.genericStringMatcher("primary", PrimaryToken))
