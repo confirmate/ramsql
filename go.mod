@@ -5,6 +5,7 @@ go 1.20
 require (
 	github.com/glebarez/go-sqlite v1.21.1
 	github.com/go-gorp/gorp v2.2.0+incompatible
+	golang.org/x/exp v0.0.0-20230713183714-613f0c0eb8a1
 	gorm.io/driver/postgres v1.5.2
 	gorm.io/gorm v1.25.2
 )
@@ -25,7 +26,6 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/ziutek/mymysql v1.5.4 // indirect
 	golang.org/x/crypto v0.8.0 // indirect
-	golang.org/x/exp v0.0.0-20230713183714-613f0c0eb8a1 // indirect
 	golang.org/x/sys v0.7.0 // indirect
 	golang.org/x/text v0.9.0 // indirect
 	modernc.org/libc v1.22.3 // indirect
