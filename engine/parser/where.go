@@ -4,6 +4,8 @@ import (
 	"fmt"
 )
 
+const errExpectedInAfterNot = "expected IN after NOT"
+
 func (p *parser) parseWhere(selectDecl *Decl) error {
 
 	// May be WHERE  here
@@ -86,7 +88,176 @@ func (p *parser) parseCondition() (*Decl, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		// Parse first attribute
+		firstAttr, err := p.parseAttribute()
+		if err != nil {
+			return nil, err
+		}
+
+		// Check if this is a tuple (comma follows) for tuple IN expressions
+		if p.is(CommaToken) {
+			// This is a tuple expression like (col1, col2) IN (...)
+			tupleDecl := &Decl{Token: BracketOpeningToken, Lexeme: "("}
+			tupleDecl.Add(firstAttr)
+
+			// Parse remaining tuple elements
+			for p.is(CommaToken) {
+				_, err := p.consumeToken(CommaToken)
+				if err != nil {
+					return nil, err
+				}
+				attr, err := p.parseAttribute()
+				if err != nil {
+					return nil, err
+				}
+				tupleDecl.Add(attr)
+			}
+
+			// Consume closing bracket
+			if _, err = p.consumeToken(BracketClosingToken); err != nil {
+				return nil, err
+			}
+
+			// Now expect IN or NOT IN
+			if p.is(InToken) {
+				inDecl, err := p.parseTupleIn(len(tupleDecl.Decl))
+				if err != nil {
+					return nil, err
+				}
+				tupleDecl.Add(inDecl)
+				return tupleDecl, nil
+			} else if p.is(NotToken) {
+				notDecl, err := p.consumeToken(NotToken)
+				if err != nil {
+					return nil, err
+				}
+				if !p.is(InToken) {
+					return nil, fmt.Errorf(errExpectedInAfterNot)
+				}
+				inDecl, err := p.parseTupleIn(len(tupleDecl.Decl))
+				if err != nil {
+					return nil, err
+				}
+				notDecl.Add(inDecl)
+				tupleDecl.Add(notDecl)
+				return tupleDecl, nil
+			}
+			return nil, fmt.Errorf("expected IN after tuple expression")
+		}
+
+		// Not a tuple, continue with normal bracket handling
 		hasBracket = true
+		// We already parsed the first attribute, so use it
+		attributeDecl := firstAttr
+
+		// Check for arithmetic operators first (*, +, -, /)
+		// This allows expressions like: WHERE (price * quantity) > 1000
+		if p.is(StarToken, PlusToken, MinusToken, DivideToken) {
+			operatorDecl, err := p.consumeToken(p.cur().Token)
+			if err != nil {
+				return nil, err
+			}
+			attributeDecl.Add(operatorDecl)
+
+			// Parse right side of arithmetic expression
+			var rightDecl *Decl
+			if p.is(NumberToken) {
+				rightDecl, err = p.consumeToken(NumberToken)
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				rightDecl, err = p.parseAttribute()
+				if err != nil {
+					return nil, err
+				}
+			}
+			attributeDecl.Add(rightDecl)
+		}
+
+		// Now check for comparison operators
+		switch p.cur().Token {
+		case EqualityToken, DistinctnessToken, LeftDipleToken, RightDipleToken, LessOrEqualToken, GreaterOrEqualToken:
+			decl, err := p.consumeToken(p.cur().Token)
+			if err != nil {
+				return nil, err
+			}
+			attributeDecl.Add(decl)
+		case InToken:
+			inDecl, err := p.parseIn()
+			if err != nil {
+				return nil, err
+			}
+			attributeDecl.Add(inDecl)
+			if hasBracket {
+				if _, err = p.consumeToken(BracketClosingToken); err != nil {
+					return nil, err
+				}
+			}
+			return attributeDecl, nil
+		case NotToken:
+			notDecl, err := p.consumeToken(p.cur().Token)
+			if err != nil {
+				return nil, err
+			}
+			if p.cur().Token != InToken {
+				return nil, fmt.Errorf(errExpectedInAfterNot)
+			}
+			inDecl, err := p.parseIn()
+			if err != nil {
+				return nil, err
+			}
+			notDecl.Add(inDecl)
+			attributeDecl.Add(notDecl)
+			if hasBracket {
+				if _, err = p.consumeToken(BracketClosingToken); err != nil {
+					return nil, err
+				}
+			}
+			return attributeDecl, nil
+		case IsToken:
+			decl, err := p.consumeToken(IsToken)
+			if err != nil {
+				return nil, err
+			}
+			attributeDecl.Add(decl)
+			if p.cur().Token == NotToken {
+				notDecl, err := p.consumeToken(NotToken)
+				if err != nil {
+					return nil, err
+				}
+				decl.Add(notDecl)
+			}
+			if p.cur().Token == NullToken {
+				nullDecl, err := p.consumeToken(NullToken)
+				if err != nil {
+					return nil, err
+				}
+				decl.Add(nullDecl)
+			}
+			if hasBracket {
+				if _, err = p.consumeToken(BracketClosingToken); err != nil {
+					return nil, err
+				}
+			}
+			return attributeDecl, nil
+		}
+
+		// Value
+		valueDecl, err := p.parseValue()
+		if err != nil {
+			return nil, err
+		}
+		attributeDecl.Add(valueDecl)
+
+		if hasBracket {
+			if _, err = p.consumeToken(BracketClosingToken); err != nil {
+				return nil, err
+			}
+		}
+
+		return attributeDecl, nil
 	}
 
 	// Attribute
@@ -142,7 +313,7 @@ func (p *parser) parseCondition() (*Decl, error) {
 		}
 
 		if p.cur().Token != InToken {
-			return nil, fmt.Errorf("expected IN after NOT")
+			return nil, fmt.Errorf(errExpectedInAfterNot)
 		}
 
 		inDecl, err := p.parseIn()
@@ -182,12 +353,6 @@ func (p *parser) parseCondition() (*Decl, error) {
 		return nil, err
 	}
 	attributeDecl.Add(valueDecl)
-
-	if hasBracket {
-		if _, err = p.consumeToken(BracketClosingToken); err != nil {
-			return nil, err
-		}
-	}
 
 	return attributeDecl, nil
 }

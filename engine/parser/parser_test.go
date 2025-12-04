@@ -457,6 +457,18 @@ func TestSelectMixedExpressions(t *testing.T) {
 	}
 }
 
+func TestTupleIn(t *testing.T) {
+	queries := []string{
+		`SELECT * FROM "controls" WHERE ("controls"."category_name","controls"."category_catalog_id") IN (('category-1','catalog-1'))`,
+		`SELECT * FROM controls WHERE (category_name, category_catalog_id) IN (('a','b'), ('c','d'))`,
+		`SELECT * FROM t WHERE (a, b) NOT IN (('x','y'))`,
+	}
+
+	for _, q := range queries {
+		parse(q, 1, t)
+	}
+}
+
 func parse(query string, instructionNumber int, t *testing.T) []Instruction {
 
 	parser := parser{}

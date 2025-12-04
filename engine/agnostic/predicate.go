@@ -907,6 +907,80 @@ func (p *InPredicate) Attribute() []string {
 	return p.v.Attribute()
 }
 
+// TupleInPredicate handles (col1, col2, ...) IN ((val1, val2, ...), ...)
+type TupleInPredicate struct {
+	functors    []ValueFunctor
+	tupleValues [][]any
+}
+
+// NewTupleInPredicate creates a predicate for tuple IN expressions
+func NewTupleInPredicate(functors []ValueFunctor, tupleValues [][]any) *TupleInPredicate {
+	return &TupleInPredicate{functors: functors, tupleValues: tupleValues}
+}
+
+func (p *TupleInPredicate) String() string {
+	return fmt.Sprintf("(%v) IN (%v)", p.functors, p.tupleValues)
+}
+
+func (p *TupleInPredicate) Type() PredicateType {
+	return In
+}
+
+func (p *TupleInPredicate) Eval(inCols []string, in *Tuple) (bool, error) {
+	// Get current values from the tuple for each functor
+	var currentValues []any
+	for _, f := range p.functors {
+		currentValues = append(currentValues, f.Value(inCols, in))
+	}
+
+	// Check if current values match any of the tuple values
+	for _, tupleVal := range p.tupleValues {
+		if len(tupleVal) != len(currentValues) {
+			continue
+		}
+
+		match := true
+		for i, cv := range currentValues {
+			eq, err := equal(cv, tupleVal[i])
+			if err != nil {
+				return false, err
+			}
+			if !eq {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func (p *TupleInPredicate) Left() (Predicate, bool) {
+	return nil, false
+}
+
+func (p *TupleInPredicate) Right() (Predicate, bool) {
+	return nil, false
+}
+
+func (p *TupleInPredicate) Relation() string {
+	if len(p.functors) > 0 {
+		return p.functors[0].Relation()
+	}
+	return ""
+}
+
+func (p *TupleInPredicate) Attribute() []string {
+	var attrs []string
+	for _, f := range p.functors {
+		attrs = append(attrs, f.Attribute()...)
+	}
+	return attrs
+}
+
 type TruePredicate struct {
 }
 

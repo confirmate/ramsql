@@ -234,7 +234,7 @@ func getSelectedTables(fromDecl *parser.Decl) (string, []string, map[string]stri
 		if d, ok := t.Has(parser.SchemaToken); ok {
 			schema = d.Lexeme
 		}
-		
+
 		// Check if this table has an alias
 		// The alias is added as a child StringToken after the table name
 		tableName := t.Lexeme
@@ -246,14 +246,14 @@ func getSelectedTables(fromDecl *parser.Decl) (string, []string, map[string]stri
 				aliases[lastChild.Lexeme] = tableName
 			}
 		}
-		
+
 		// Legacy check for explicit AS token (kept for compatibility)
 		if d, ok := t.Has(parser.AsToken); ok {
 			if len(d.Decl) > 0 {
 				aliases[d.Decl[0].Lexeme] = tableName
 			}
 		}
-		
+
 		tables = append(tables, tableName)
 	}
 
@@ -309,6 +309,37 @@ func (t *Tx) getPredicates(decl []*parser.Decl, schema, fromTableName string, ar
 	if cond.Lexeme == "1" {
 		log.Debug("Cond is %+v, returning TruePredicate", cond)
 		return agnostic.NewTruePredicate(), nil
+	}
+
+	// Handle tuple IN expression: (col1, col2) IN (...)
+	if cond.Token == parser.BracketOpeningToken {
+		// Find InToken or NotToken in the children
+		var inDecl *parser.Decl
+		var isNot bool
+		var attrs []*parser.Decl
+
+		for _, child := range cond.Decl {
+			if child.Token == parser.InToken {
+				inDecl = child
+				break
+			} else if child.Token == parser.NotToken {
+				isNot = true
+				if len(child.Decl) > 0 && child.Decl[0].Token == parser.InToken {
+					inDecl = child.Decl[0]
+				}
+				break
+			} else {
+				attrs = append(attrs, child)
+			}
+		}
+
+		if inDecl != nil && len(attrs) > 0 {
+			p, err := tupleInExecutor(fromTableName, attrs, inDecl, isNot, aliases)
+			if err != nil {
+				return nil, err
+			}
+			return p, nil
+		}
 	}
 
 	switch cond.Decl[0].Token {
@@ -589,6 +620,47 @@ func inExecutor(rname string, aname string, inDecl *parser.Decl) (agnostic.Predi
 	}
 
 	p := agnostic.NewInPredicate(v, n)
+	return p, nil
+}
+
+// tupleInExecutor builds a predicate for tuple IN expressions like (col1, col2) IN (('a','b'), ('c','d'))
+func tupleInExecutor(fromTableName string, attrs []*parser.Decl, inDecl *parser.Decl, isNot bool, aliases map[string]string) (agnostic.Predicate, error) {
+	if len(inDecl.Decl) == 0 {
+		return nil, ParsingError
+	}
+
+	// Build list of attribute value functors
+	var functors []agnostic.ValueFunctor
+	for _, attr := range attrs {
+		tableName := fromTableName
+		attrName := strings.ToLower(attr.Lexeme)
+
+		// Check if attribute has table prefix (child is the table name)
+		if len(attr.Decl) > 0 {
+			tableName = attr.Decl[0].Lexeme
+		}
+
+		tableName = getAlias(tableName, aliases)
+		functors = append(functors, agnostic.NewAttributeValueFunctor(tableName, attrName))
+	}
+
+	// Build list of tuple values from inDecl
+	// Each child of inDecl is a BracketOpeningToken containing the tuple values
+	var tupleValues [][]any
+	for _, tupleDecl := range inDecl.Decl {
+		if tupleDecl.Token == parser.BracketOpeningToken {
+			var values []any
+			for _, valDecl := range tupleDecl.Decl {
+				values = append(values, valDecl.Lexeme)
+			}
+			tupleValues = append(tupleValues, values)
+		}
+	}
+
+	p := agnostic.NewTupleInPredicate(functors, tupleValues)
+	if isNot {
+		return agnostic.NewNotPredicate(p), nil
+	}
 	return p, nil
 }
 
