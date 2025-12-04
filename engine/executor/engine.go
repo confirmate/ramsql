@@ -522,7 +522,7 @@ func handleOnConflict(t *Tx, schemaName, relationName string, values map[string]
 		return updatedTuples[0], nil
 	}
 
-	return nil, fmt.Errorf("ON CONFLICT DO UPDATE: no rows matched for update despite detected conflict")
+	return nil, fmt.Errorf("internal error: conflict detected but no matching rows found for update")
 }
 
 // buildConflictPredicate builds a predicate to match the conflicting row based on conflict columns.
