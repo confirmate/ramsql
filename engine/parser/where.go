@@ -4,6 +4,8 @@ import (
 	"fmt"
 )
 
+const errExpectedInAfterNot = "expected IN after NOT"
+
 func (p *parser) parseWhere(selectDecl *Decl) error {
 
 	// May be WHERE  here
@@ -131,7 +133,7 @@ func (p *parser) parseCondition() (*Decl, error) {
 					return nil, err
 				}
 				if !p.is(InToken) {
-					return nil, fmt.Errorf("expected IN after NOT")
+					return nil, fmt.Errorf(errExpectedInAfterNot)
 				}
 				inDecl, err := p.parseTupleIn(len(tupleDecl.Decl))
 				if err != nil {
@@ -200,7 +202,7 @@ func (p *parser) parseCondition() (*Decl, error) {
 				return nil, err
 			}
 			if p.cur().Token != InToken {
-				return nil, fmt.Errorf("expected IN after NOT")
+				return nil, fmt.Errorf(errExpectedInAfterNot)
 			}
 			inDecl, err := p.parseIn()
 			if err != nil {
@@ -311,7 +313,7 @@ func (p *parser) parseCondition() (*Decl, error) {
 		}
 
 		if p.cur().Token != InToken {
-			return nil, fmt.Errorf("expected IN after NOT")
+			return nil, fmt.Errorf(errExpectedInAfterNot)
 		}
 
 		inDecl, err := p.parseIn()

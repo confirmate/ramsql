@@ -334,7 +334,7 @@ func (t *Tx) getPredicates(decl []*parser.Decl, schema, fromTableName string, ar
 		}
 
 		if inDecl != nil && len(attrs) > 0 {
-			p, err := tupleInExecutor(schema, fromTableName, attrs, inDecl, isNot, aliases)
+			p, err := tupleInExecutor(fromTableName, attrs, inDecl, isNot, aliases)
 			if err != nil {
 				return nil, err
 			}
@@ -624,7 +624,7 @@ func inExecutor(rname string, aname string, inDecl *parser.Decl) (agnostic.Predi
 }
 
 // tupleInExecutor builds a predicate for tuple IN expressions like (col1, col2) IN (('a','b'), ('c','d'))
-func tupleInExecutor(schema, fromTableName string, attrs []*parser.Decl, inDecl *parser.Decl, isNot bool, aliases map[string]string) (agnostic.Predicate, error) {
+func tupleInExecutor(fromTableName string, attrs []*parser.Decl, inDecl *parser.Decl, isNot bool, aliases map[string]string) (agnostic.Predicate, error) {
 	if len(inDecl.Decl) == 0 {
 		return nil, ParsingError
 	}

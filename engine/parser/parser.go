@@ -610,7 +610,6 @@ func (p *parser) parseTupleIn(tupleSize int) (*Decl, error) {
 	}
 
 	// list of tuples
-	gotList := false
 	for {
 		// Each tuple starts with (
 		tupleDecl := &Decl{Token: BracketOpeningToken, Lexeme: "("}
@@ -643,11 +642,10 @@ func (p *parser) parseTupleIn(tupleSize int) (*Decl, error) {
 		}
 
 		inDecl.Add(tupleDecl)
-		gotList = true
 
 		// Check for more tuples or end
 		if p.is(BracketClosingToken) {
-			if !gotList {
+			if len(inDecl.Decl) == 0 {
 				return nil, fmt.Errorf("IN clause: empty list of tuples")
 			}
 			_, err = p.consumeToken(BracketClosingToken)
