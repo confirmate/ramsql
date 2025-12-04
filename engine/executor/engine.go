@@ -489,7 +489,7 @@ func handleOnConflict(t *Tx, schemaName, relationName string, values map[string]
 	}
 
 	if doUpdateDecl == nil {
-		return nil, fmt.Errorf("primary key violation")
+		return nil, fmt.Errorf("ON CONFLICT DO UPDATE specified but UPDATE clause not found")
 	}
 
 	// Get the conflict target columns
@@ -511,8 +511,8 @@ func handleOnConflict(t *Tx, schemaName, relationName string, values map[string]
 	// Get the SET clause values
 	updateValues := extractUpdateValues(doUpdateDecl, values)
 
-	// Perform the update
-	selectors := []agnostic.Selector{agnostic.NewAttributeSelector(relationName, specifiedAttrs)}
+	// Perform the update - use star selector to include all columns for RETURNING and DO UPDATE SET
+	selectors := []agnostic.Selector{agnostic.NewStarSelector(relationName)}
 	_, updatedTuples, err := t.tx.Update(schemaName, relationName, updateValues, selectors, predicate)
 	if err != nil {
 		return nil, err
@@ -522,7 +522,7 @@ func handleOnConflict(t *Tx, schemaName, relationName string, values map[string]
 		return updatedTuples[0], nil
 	}
 
-	return nil, nil
+	return nil, fmt.Errorf("ON CONFLICT DO UPDATE: no rows matched for update despite detected conflict")
 }
 
 // buildConflictPredicate builds a predicate to match the conflicting row based on conflict columns.
