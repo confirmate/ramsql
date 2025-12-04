@@ -473,8 +473,16 @@ func handleOnConflict(t *Tx, schemaName, relationName string, values map[string]
 		return t.tx.Insert(schemaName, relationName, values)
 	}
 
+	// Validate ON CONFLICT clause structure
+	if len(onConflictDecl.Decl) < 2 {
+		return nil, fmt.Errorf("invalid ON CONFLICT clause structure")
+	}
+
 	// Check if it's DO NOTHING
 	doDecl := onConflictDecl.Decl[1] // DoToken
+	if doDecl.Token != parser.DoToken {
+		return nil, fmt.Errorf("unexpected ON CONFLICT clause structure: missing DO token")
+	}
 	if len(doDecl.Decl) > 0 && doDecl.Decl[0].Token == parser.NothingToken {
 		// DO NOTHING - return nil to signal skipping this row
 		return nil, nil
@@ -486,6 +494,9 @@ func handleOnConflict(t *Tx, schemaName, relationName string, values map[string]
 
 	// Get the conflict target columns
 	conflictDecl := onConflictDecl.Decl[0] // ConflictToken
+	if conflictDecl.Token != parser.ConflictToken {
+		return nil, fmt.Errorf("invalid ON CONFLICT clause structure: missing CONFLICT token")
+	}
 	var conflictCols []string
 	for _, colDecl := range conflictDecl.Decl {
 		conflictCols = append(conflictCols, strings.ToLower(colDecl.Lexeme))
@@ -493,6 +504,9 @@ func handleOnConflict(t *Tx, schemaName, relationName string, values map[string]
 
 	// Build predicate for the conflicting row
 	predicate := buildConflictPredicate(relationName, conflictCols, values)
+	if predicate == nil {
+		return nil, fmt.Errorf("conflict target columns must have values in the INSERT statement")
+	}
 
 	// Get the SET clause values
 	updateValues := extractUpdateValues(doUpdateDecl, values)
@@ -541,6 +555,9 @@ func buildConflictPredicate(relationName string, conflictCols []string, values m
 // extractUpdateValues extracts the column values to update from the DO UPDATE SET clause.
 // It handles "excluded"."column" references by looking up values from the INSERT values.
 func extractUpdateValues(doUpdateDecl *parser.Decl, insertValues map[string]any) map[string]any {
+	if doUpdateDecl == nil || len(doUpdateDecl.Decl) == 0 {
+		return make(map[string]any)
+	}
 	setDecl := doUpdateDecl.Decl[0] // SetToken
 	updateValues := make(map[string]any)
 

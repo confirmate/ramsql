@@ -488,7 +488,9 @@ func (t *Transaction) CheckPrimaryKeyConflict(schema, relation string, values ma
 		} else if attr.defaultValue != nil {
 			tuple.Append(attr.defaultValue())
 		} else if attr.autoIncrement {
-			tuple.Append(reflect.ValueOf(attr.nextValue).Convert(attr.typeInstance).Interface())
+			// For auto-increment columns, only use the value if explicitly specified;
+			// otherwise, append nil to avoid side effects with nextValue
+			tuple.Append(nil)
 		} else {
 			tuple.Append(nil)
 		}
