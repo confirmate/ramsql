@@ -110,3 +110,56 @@ func TestNotIn(t *testing.T) {
 	}
 
 }
+
+func TestTupleIn(t *testing.T) {
+
+	batch := []string{
+		`CREATE TABLE user (name TEXT, surname TEXT, age INT);`,
+		`INSERT INTO user (name, surname, age) VALUES (Foo, Bar, 20);`,
+		`INSERT INTO user (name, surname, age) VALUES (John, Doe, 32);`,
+		`INSERT INTO user (name, surname, age) VALUES (Jane, Doe, 33);`,
+		`INSERT INTO user (name, surname, age) VALUES (Joe, Doe, 10);`,
+		`INSERT INTO user (name, surname, age) VALUES (Homer, Simpson, 40);`,
+		`INSERT INTO user (name, surname, age) VALUES (Marge, Simpson, 40);`,
+		`INSERT INTO user (name, surname, age) VALUES (Bruce, Wayne, 3333);`,
+	}
+
+	db, err := sql.Open("ramsql", "TestTupleIn")
+	if err != nil {
+		t.Fatalf("sql.Open : Error : %s\n", err)
+	}
+	defer db.Close()
+
+	for _, b := range batch {
+		_, err = db.Exec(b)
+		if err != nil {
+			t.Fatalf("sql.Exec: Error: %s\n", err)
+		}
+	}
+
+	query := `SELECT * FROM user WHERE (user.name, user.surname) IN (('Homer', 'Simpson'), ('Bruce', 'Wayne'))`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("sql.Query: %s", err)
+	}
+
+	var nb int
+	for rows.Next() {
+		var name, surname string
+		var age int
+		if err := rows.Scan(&name, &surname, &age); err != nil {
+			t.Fatalf("Cannot scan row: %s", err)
+		}
+		if !((name == "Homer" && surname == "Simpson") || (name == "Bruce" && surname == "Wayne")) {
+			t.Fatalf("Unwanted row: %s %s %d", name, surname, age)
+		}
+
+		nb++
+	}
+
+	if nb != 2 {
+		t.Fatalf("Expected 2 rows, got %d", nb)
+	}
+
+}

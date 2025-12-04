@@ -595,6 +595,77 @@ func (p *parser) parseIn() (*Decl, error) {
 	return inDecl, nil
 }
 
+// parseTupleIn parses IN clause with tuple values like IN (('a','b'), ('c','d'))
+// tupleSize is the expected number of elements in each tuple
+func (p *parser) parseTupleIn(tupleSize int) (*Decl, error) {
+	inDecl, err := p.consumeToken(InToken)
+	if err != nil {
+		return nil, err
+	}
+
+	// outer bracket opening
+	_, err = p.consumeToken(BracketOpeningToken)
+	if err != nil {
+		return nil, err
+	}
+
+	// list of tuples
+	gotList := false
+	for {
+		// Each tuple starts with (
+		tupleDecl := &Decl{Token: BracketOpeningToken, Lexeme: "("}
+
+		_, err = p.consumeToken(BracketOpeningToken)
+		if err != nil {
+			return nil, err
+		}
+
+		// Parse tuple values
+		for i := 0; i < tupleSize; i++ {
+			v, err := p.parseValue()
+			if err != nil {
+				return nil, err
+			}
+			tupleDecl.Add(v)
+
+			if i < tupleSize-1 {
+				_, err = p.consumeToken(CommaToken)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+
+		// closing bracket for this tuple
+		_, err = p.consumeToken(BracketClosingToken)
+		if err != nil {
+			return nil, err
+		}
+
+		inDecl.Add(tupleDecl)
+		gotList = true
+
+		// Check for more tuples or end
+		if p.is(BracketClosingToken) {
+			if !gotList {
+				return nil, fmt.Errorf("IN clause: empty list of tuples")
+			}
+			_, err = p.consumeToken(BracketClosingToken)
+			if err != nil {
+				return nil, err
+			}
+			break
+		}
+
+		_, err = p.consumeToken(CommaToken)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return inDecl, nil
+}
+
 func (p *parser) parseValue() (*Decl, error) {
 	quoted := false
 
