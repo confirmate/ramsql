@@ -463,6 +463,46 @@ func (t *Transaction) Update(schema, relation string, values map[string]any, sel
 	return cols, res, nil
 }
 
+// CheckPrimaryKeyConflict checks if inserting the given values would cause a primary key conflict
+// without aborting the transaction. Returns true if there's a conflict, false otherwise.
+func (t *Transaction) CheckPrimaryKeyConflict(schema, relation string, values map[string]any) (bool, error) {
+	if err := t.aborted(); err != nil {
+		return false, err
+	}
+
+	s, err := t.e.schema(schema)
+	if err != nil {
+		return false, err
+	}
+	r, err := s.Relation(relation)
+	if err != nil {
+		return false, err
+	}
+
+	// Build a partial tuple with just the primary key values
+	tuple := &Tuple{}
+	for _, attr := range r.attributes {
+		val, specified := values[attr.name]
+		if specified {
+			tuple.Append(val)
+		} else if attr.defaultValue != nil {
+			tuple.Append(attr.defaultValue())
+		} else if attr.autoIncrement {
+			tuple.Append(reflect.ValueOf(attr.nextValue).Convert(attr.typeInstance).Interface())
+		} else {
+			tuple.Append(nil)
+		}
+	}
+
+	// Check primary key conflict
+	ok, err := r.CheckPrimaryKey(tuple)
+	if err != nil {
+		return false, err
+	}
+	// ok = true means no conflict, ok = false means conflict
+	return !ok, nil
+}
+
 // Build tuple for given relation
 // for each column:
 // - if not specified, use default value if set

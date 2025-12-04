@@ -1,5 +1,7 @@
 package parser
 
+import "fmt"
+
 // Parses an INSERT statement.
 //
 // The generated AST is as follows:
@@ -14,6 +16,14 @@ package parser
 //	            |-> value
 //	            |-> (...)
 //	        |-> (...)
+//	    |-> "ON" (OnToken) (optional, for ON CONFLICT)
+//	        |-> "CONFLICT" (ConflictToken)
+//	            |-> column name (conflict target)
+//	            |-> (...)
+//	        |-> "DO" (DoToken)
+//	            |-> "UPDATE" (UpdateToken) or "NOTHING" (NothingToken)
+//	                |-> "SET" (SetToken) (if UPDATE)
+//	                    |-> column = value assignments
 //	    |-> "RETURNING" (ReturningToken) (optional)
 //	        |-> column name
 func (p *parser) parseInsert() (*Instruction, error) {
@@ -106,6 +116,108 @@ func (p *parser) parseInsert() (*Instruction, error) {
 		}
 
 		break
+	}
+
+	// we may have ON CONFLICT clause here
+	if p.is(OnToken) {
+		onDecl, err := p.consumeToken(OnToken)
+		if err != nil {
+			return nil, err
+		}
+		insertDecl.Add(onDecl)
+
+		conflictDecl, err := p.consumeToken(ConflictToken)
+		if err != nil {
+			return nil, err
+		}
+		onDecl.Add(conflictDecl)
+
+		// Parse conflict target (column names in parentheses)
+		_, err = p.consumeToken(BracketOpeningToken)
+		if err != nil {
+			return nil, err
+		}
+
+		for {
+			attrDecl, err := p.parseAttribute()
+			if err != nil {
+				return nil, err
+			}
+			conflictDecl.Add(attrDecl)
+
+			if p.is(BracketClosingToken) {
+				_, err = p.consumeToken(BracketClosingToken)
+				if err != nil {
+					return nil, err
+				}
+				break
+			}
+
+			_, err = p.consumeToken(CommaToken)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		// Parse DO clause
+		doDecl, err := p.consumeToken(DoToken)
+		if err != nil {
+			return nil, err
+		}
+		onDecl.Add(doDecl)
+
+		// Either UPDATE or NOTHING
+		if p.is(NothingToken) {
+			nothingDecl, err := p.consumeToken(NothingToken)
+			if err != nil {
+				return nil, err
+			}
+			doDecl.Add(nothingDecl)
+		} else if p.is(UpdateToken) {
+			updateDecl, err := p.consumeToken(UpdateToken)
+			if err != nil {
+				return nil, err
+			}
+			doDecl.Add(updateDecl)
+
+			// Parse SET clause
+			setDecl, err := p.consumeToken(SetToken)
+			if err != nil {
+				return nil, err
+			}
+			updateDecl.Add(setDecl)
+
+			// Parse column = value assignments
+			for {
+				attrDecl, err := p.parseAttribute()
+				if err != nil {
+					return nil, err
+				}
+				setDecl.Add(attrDecl)
+
+				_, err = p.consumeToken(EqualityToken)
+				if err != nil {
+					return nil, err
+				}
+
+				// Parse the value (can be "excluded"."column" or a regular value)
+				valueDecl, err := p.parseAttribute()
+				if err != nil {
+					return nil, err
+				}
+				attrDecl.Add(valueDecl)
+
+				if !p.is(CommaToken) {
+					break
+				}
+				_, err = p.consumeToken(CommaToken)
+				if err != nil {
+					return nil, err
+				}
+			}
+		} else {
+			return nil, fmt.Errorf("expected UPDATE or NOTHING after DO")
+		}
 	}
 
 	// we may have `returning "something"` here

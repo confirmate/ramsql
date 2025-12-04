@@ -99,6 +99,10 @@ const (
 	CascadeToken
 	RestrictToken
 	ActionToken
+	ConflictToken
+	DoToken
+	ExcludedToken
+	NothingToken
 
 	// Type Token
 
@@ -226,6 +230,10 @@ func (l *lexer) lex(instruction []byte) ([]Token, error) {
 	matchers = append(matchers, l.genericStringMatcher("cascade", CascadeToken))
 	matchers = append(matchers, l.genericStringMatcher("restrict", RestrictToken))
 	matchers = append(matchers, l.genericStringMatcher("action", ActionToken))
+	matchers = append(matchers, l.genericStringMatcher("conflict", ConflictToken))
+	matchers = append(matchers, l.genericStringMatcher("do", DoToken))
+	matchers = append(matchers, l.genericStringMatcher("excluded", ExcludedToken))
+	matchers = append(matchers, l.genericStringMatcher("nothing", NothingToken))
 	// Type Matcher
 	matchers = append(matchers, l.genericStringMatcher("decimal", DecimalToken))
 	matchers = append(matchers, l.genericStringMatcher("primary", PrimaryToken))

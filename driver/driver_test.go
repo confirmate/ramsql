@@ -1757,6 +1757,120 @@ func TestInsertMultipleReturning(t *testing.T) {
 	}
 }
 
+func TestInsertOnConflictDoUpdate(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestInsertOnConflictDoUpdate")
+	if err != nil {
+		t.Fatalf("sql.Open : Error : %s\n", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE states (id TEXT PRIMARY KEY, state TEXT, certificate_id TEXT)`)
+	if err != nil {
+		t.Fatalf("sql.Exec: Error: %s\n", err)
+	}
+
+	// Insert initial row
+	_, err = db.Exec(`INSERT INTO states (id, state, certificate_id) VALUES ('key1', 'active', 'cert-1')`)
+	if err != nil {
+		t.Fatalf("Cannot insert into table: %s", err)
+	}
+
+	// Verify initial state
+	var certificateID string
+	err = db.QueryRow(`SELECT certificate_id FROM states WHERE id = 'key1'`).Scan(&certificateID)
+	if err != nil {
+		t.Fatalf("Cannot query: %s", err)
+	}
+	if certificateID != "cert-1" {
+		t.Fatalf("Expected certificate_id 'cert-1', got '%s'", certificateID)
+	}
+
+	// Insert with ON CONFLICT DO UPDATE
+	_, err = db.Exec(`INSERT INTO states (id, state, certificate_id) VALUES ('key1', 'active', 'cert-2') ON CONFLICT (id) DO UPDATE SET certificate_id = "excluded"."certificate_id"`)
+	if err != nil {
+		t.Fatalf("Cannot upsert into table: %s", err)
+	}
+
+	// Verify updated state
+	err = db.QueryRow(`SELECT certificate_id FROM states WHERE id = 'key1'`).Scan(&certificateID)
+	if err != nil {
+		t.Fatalf("Cannot query: %s", err)
+	}
+	if certificateID != "cert-2" {
+		t.Fatalf("Expected certificate_id 'cert-2', got '%s'", certificateID)
+	}
+}
+
+func TestInsertOnConflictDoUpdateGormStyle(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestInsertOnConflictDoUpdateGormStyle")
+	if err != nil {
+		t.Fatalf("sql.Open : Error : %s\n", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE "states" ("id" TEXT PRIMARY KEY, "state" TEXT, "tree_id" TEXT, "extra" TEXT, "certificate_id" TEXT)`)
+	if err != nil {
+		t.Fatalf("sql.Exec: Error: %s\n", err)
+	}
+
+	// Insert initial row
+	_, err = db.Exec(`INSERT INTO "states" ("id","state","tree_id","extra","certificate_id") VALUES ('key1','active','tree1','extra1','cert-1')`)
+	if err != nil {
+		t.Fatalf("Cannot insert into table: %s", err)
+	}
+
+	// Insert with ON CONFLICT DO UPDATE (GORM-style with double quotes)
+	_, err = db.Exec(`INSERT INTO "states" ("id","state","tree_id","extra","certificate_id") VALUES ('key1','active','tree1','extra1','cert-2') ON CONFLICT ("id") DO UPDATE SET "certificate_id"="excluded"."certificate_id"`)
+	if err != nil {
+		t.Fatalf("Cannot upsert into table: %s", err)
+	}
+
+	// Verify updated state
+	var certificateID string
+	err = db.QueryRow(`SELECT certificate_id FROM states WHERE id = 'key1'`).Scan(&certificateID)
+	if err != nil {
+		t.Fatalf("Cannot query: %s", err)
+	}
+	if certificateID != "cert-2" {
+		t.Fatalf("Expected certificate_id 'cert-2', got '%s'", certificateID)
+	}
+}
+
+func TestInsertOnConflictDoNothing(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestInsertOnConflictDoNothing")
+	if err != nil {
+		t.Fatalf("sql.Open : Error : %s\n", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE states (id TEXT PRIMARY KEY, state TEXT)`)
+	if err != nil {
+		t.Fatalf("sql.Exec: Error: %s\n", err)
+	}
+
+	// Insert initial row
+	_, err = db.Exec(`INSERT INTO states (id, state) VALUES ('key1', 'active')`)
+	if err != nil {
+		t.Fatalf("Cannot insert into table: %s", err)
+	}
+
+	// Insert with ON CONFLICT DO NOTHING - should not error
+	_, err = db.Exec(`INSERT INTO states (id, state) VALUES ('key1', 'inactive') ON CONFLICT (id) DO NOTHING`)
+	if err != nil {
+		t.Fatalf("ON CONFLICT DO NOTHING should not error: %s", err)
+	}
+
+	// Verify state is unchanged
+	var state string
+	err = db.QueryRow(`SELECT state FROM states WHERE id = 'key1'`).Scan(&state)
+	if err != nil {
+		t.Fatalf("Cannot query: %s", err)
+	}
+	if state != "active" {
+		t.Fatalf("Expected state 'active', got '%s'", state)
+	}
+}
+
 func TestJoinOrderBy(t *testing.T) {
 
 	db, err := sql.Open("ramsql", "TestJoinOrderBy")
