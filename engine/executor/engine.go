@@ -581,8 +581,29 @@ func extractUpdateValues(doUpdateDecl *parser.Decl, insertValues map[string]any)
 			}
 		} else {
 			// Direct value reference
-			updateValues[colName] = valueAttrDecl.Lexeme
-		}
+			var typeName string
+			switch valueAttrDecl.Token {
+			case parser.IntToken, parser.NumberToken:
+				typeName = "bigint"
+			case parser.DateToken:
+				typeName = "timestamp"
+			case parser.TextToken:
+				typeName = "text"
+			case parser.FloatToken:
+				typeName = "float"
+			default:
+				typeName = "text"
+				if _, err := agnostic.ToInstance(valueAttrDecl.Lexeme, "timestamp"); err == nil {
+					typeName = "timestamp"
+				}
+			}
+			v, err := agnostic.ToInstance(valueAttrDecl.Lexeme, typeName)
+			if err != nil {
+				// fallback to string if conversion fails
+				updateValues[colName] = valueAttrDecl.Lexeme
+			} else {
+				updateValues[colName] = v
+			}
 	}
 
 	return updateValues
