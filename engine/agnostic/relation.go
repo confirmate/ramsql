@@ -53,15 +53,11 @@ func NewRelation(schema, name string, attributes []Attribute, pk []string) (*Rel
 		}
 	}
 
-	// Create indexes for foreign key local columns to speed lookups and RESTRICT checks
-	// Derive unique FK groups from attribute metadata.
-	for _, fk := range uniqueRelationFKs(r) {
-		local := fk.LocalColumns()
-		if len(local) == 0 {
-			continue
-		}
-		r.ensureHashIndex("fk_", local)
-	}
+	// Note: We intentionally do NOT create hash indexes for FK columns.
+	// Hash indexes only store one row per key, so they can't be used for
+	// sourcing non-unique FK lookups. Creating them causes incorrect results
+	// when used as a query source (returns wrong row when multiple rows have
+	// same FK value). The seq scan fallback correctly handles FK validation.
 
 	return r, nil
 }

@@ -334,7 +334,7 @@ func (t *Tx) getPredicates(decl []*parser.Decl, schema, fromTableName string, ar
 		}
 
 		if inDecl != nil && len(attrs) > 0 {
-			p, err := tupleInExecutor(fromTableName, attrs, inDecl, isNot, aliases)
+			p, err := tupleInExecutor(fromTableName, attrs, inDecl, isNot, aliases, args)
 			if err != nil {
 				return nil, err
 			}
@@ -624,7 +624,7 @@ func inExecutor(rname string, aname string, inDecl *parser.Decl) (agnostic.Predi
 }
 
 // tupleInExecutor builds a predicate for tuple IN expressions like (col1, col2) IN (('a','b'), ('c','d'))
-func tupleInExecutor(fromTableName string, attrs []*parser.Decl, inDecl *parser.Decl, isNot bool, aliases map[string]string) (agnostic.Predicate, error) {
+func tupleInExecutor(fromTableName string, attrs []*parser.Decl, inDecl *parser.Decl, isNot bool, aliases map[string]string, args []NamedValue) (agnostic.Predicate, error) {
 	if len(inDecl.Decl) == 0 {
 		return nil, ParsingError
 	}
@@ -651,7 +651,20 @@ func tupleInExecutor(fromTableName string, attrs []*parser.Decl, inDecl *parser.
 		if tupleDecl.Token == parser.BracketOpeningToken {
 			var values []any
 			for _, valDecl := range tupleDecl.Decl {
-				values = append(values, valDecl.Lexeme)
+				switch valDecl.Token {
+				case parser.ArgToken:
+					// Handle prepared statement placeholder ($1, $2, etc.)
+					idx, err := strconv.ParseInt(valDecl.Lexeme, 10, 64)
+					if err != nil {
+						return nil, fmt.Errorf("cannot parse arg index %s: %w", valDecl.Lexeme, err)
+					}
+					if int(idx) > len(args) || idx < 1 {
+						return nil, fmt.Errorf("arg index %d out of range (have %d args)", idx, len(args))
+					}
+					values = append(values, args[idx-1].Value)
+				default:
+					values = append(values, valDecl.Lexeme)
+				}
 			}
 			tupleValues = append(tupleValues, values)
 		}

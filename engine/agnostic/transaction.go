@@ -348,46 +348,90 @@ func (t *Transaction) Delete(schema, relation string, selectors []Selector, p Pr
 		for schName, sch := range t.e.schemas {
 			// skip information_schema
 			for childName, childRel := range sch.relations {
-				for _, at := range childRel.attributes {
-					if at.fk == nil {
+				// Group FKs by signature and check each unique FK once
+				childFKs := uniqueRelationFKs(childRel)
+				for _, fk := range childFKs {
+					refSchema := fk.RefSchema()
+					if refSchema == "" {
+						refSchema = schName
+					}
+					if refSchema != s.name || fk.RefRelation() != relation {
 						continue
 					}
-					refSchema := at.fk.RefSchema()
-					if refSchema == "" {
-						refSchema = schName // referencing default schema is child's schema? If empty, assume same as child schema; default to current schema if needed
+
+					// Get referenced columns (or use parent PK if not specified)
+					refCols := fk.RefColumns()
+					if len(refCols) == 0 {
+						// Reference parent PK
+						if len(r.pk) != len(fk.LocalColumns()) {
+							return nil, nil, t.abort(fmt.Errorf("delete restrict: FK on %s.%s has %d columns but parent PK on %s.%s has %d columns", schName, childName, len(fk.LocalColumns()), s.name, relation, len(r.pk)))
+						}
+						for _, pkIdx := range r.pk {
+							refCols = append(refCols, r.attributes[pkIdx].name)
+						}
 					}
-					if refSchema == s.name && at.fk.RefRelation() == relation {
-						// Determine referenced column
-						refCols := at.fk.RefColumns()
-						var refCol string
-						if len(refCols) > 0 {
-							refCol = refCols[0]
+
+					// Ensure FK and ref columns match in count
+					if len(fk.LocalColumns()) != len(refCols) {
+						return nil, nil, t.abort(fmt.Errorf("delete restrict: FK on %s.%s has %d columns but references %d columns on %s.%s", schName, childName, len(fk.LocalColumns()), len(refCols), s.name, relation))
+					}
+
+					// Build map of parent values for all referenced columns
+					parentVals := make(map[string]any)
+					hasNonNull := false
+					for _, refCol := range refCols {
+						pidx, ok := r.attrIndex[refCol]
+						if !ok {
+							return nil, nil, t.abort(fmt.Errorf("referenced column %s not found in parent %s.%s", refCol, s.name, relation))
+						}
+						val := tup.values[pidx]
+						parentVals[refCol] = val
+						if val != nil {
+							hasNonNull = true
+						}
+					}
+
+					// If all parent FK columns are NULL, skip (no child can reference NULL)
+					if !hasNonNull {
+						continue
+					}
+
+					// Build composite predicate: localCol1=parentVal1 AND localCol2=parentVal2 AND ...
+					var pred Predicate
+					for i, localCol := range fk.LocalColumns() {
+						refCol := refCols[i]
+						val := parentVals[refCol]
+						// If any column is NULL, skip this FK check (NULL can't be referenced)
+						if val == nil {
+							pred = nil
+							break
+						}
+						eqPred := NewEqPredicate(NewAttributeValueFunctor(childName, localCol), NewConstValueFunctor(val))
+						if pred == nil {
+							pred = eqPred
 						} else {
-							// use parent PK (single-column only)
-							if len(r.pk) != 1 {
-								return nil, nil, t.abort(fmt.Errorf("delete restrict not supported for composite primary key on %s.%s", s.name, relation))
-							}
-							refCol = r.attributes[r.pk[0]].name
+							pred = NewAndPredicate(pred, eqPred)
 						}
-						// parent value
-						pidx := r.attrIndex[refCol]
-						pval := tup.values[pidx]
-						if pval == nil {
-							continue
-						}
-						// Build predicate on child: child.at.name = parent value
-						cond := NewEqPredicate(NewAttributeValueFunctor(childName, at.name), NewConstValueFunctor(pval))
-						n2, err := t.Plan(schName, nil, cond, nil, nil)
-						if err != nil {
-							return nil, nil, t.abort(err)
-						}
-						_, rows2, err := n2.Exec()
-						if err != nil {
-							return nil, nil, t.abort(err)
-						}
-						if len(rows2) > 0 {
-							return nil, nil, t.abort(fmt.Errorf("delete violates foreign key: %s.%s is referenced by %s.%s", s.name, relation, schName, childName))
-						}
+					}
+
+					// If predicate is nil (some column was NULL), skip
+					if pred == nil {
+						continue
+					}
+
+					// Check if any child rows reference this parent row
+					n2, err := t.Plan(schName, nil, pred, nil, nil)
+					if err != nil {
+						return nil, nil, t.abort(err)
+					}
+					_, rows2, err := n2.Exec()
+					if err != nil {
+						return nil, nil, t.abort(err)
+					}
+					if len(rows2) > 0 {
+						localColsStr := strings.Join(fk.LocalColumns(), ", ")
+						refColsStr := strings.Join(refCols, ", ")
+						return nil, nil, t.abort(fmt.Errorf("delete violates foreign key: %s.%s(%s) is referenced by %s.%s(%s)", s.name, relation, refColsStr, schName, childName, localColsStr))
 					}
 				}
 			}

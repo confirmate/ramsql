@@ -6,6 +6,7 @@ import (
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 type Product struct {
@@ -195,5 +196,118 @@ func TestGormManyToManyWithJoinTable(t *testing.T) {
 	}
 	if results[0].Price != 99.99 {
 		t.Errorf("expected Price 99.99, got %f", results[0].Price)
+	}
+}
+
+// TestGormCompositeForeignKey tests composite foreign keys with GORM AutoMigrate.
+// This reproduces the exact setup from https://github.com/confirmate/ramsql/pull/19
+// where a Control references a Category with a composite PK (name, catalog_id).
+func TestGormCompositeForeignKey(t *testing.T) {
+	// Define the models matching the user's setup
+	type Catalog struct {
+		Id string `gorm:"column:id;primaryKey"`
+	}
+
+	type Category struct {
+		Name      string   `gorm:"column:name;primaryKey"`
+		CatalogId string   `gorm:"column:catalog_id;primaryKey"`
+		Catalog   *Catalog `gorm:"foreignKey:CatalogId;references:Id"`
+	}
+
+	type Control struct {
+		Id                string    `gorm:"column:id;primaryKey"`
+		CategoryName      string    `gorm:"column:category_name"`
+		CategoryCatalogId string    `gorm:"column:category_catalog_id"`
+		Category          *Category `gorm:"foreignKey:CategoryName,CategoryCatalogId;references:Name,CatalogId"`
+	}
+
+	ramdb, err := sql.Open("ramsql", "TestGormCompositeForeignKey")
+	if err != nil {
+		t.Fatalf("cannot open db: %s", err)
+	}
+	defer ramdb.Close()
+
+	db, err := gorm.Open(postgres.New(postgres.Config{
+		Conn: ramdb,
+	}), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Info),
+	})
+	if err != nil {
+		t.Fatalf("cannot setup gorm: %s", err)
+	}
+
+	// AutoMigrate creates tables with FK constraints
+	err = db.AutoMigrate(&Catalog{}, &Category{}, &Control{})
+	if err != nil {
+		t.Fatalf("cannot automigrate: %s", err)
+	}
+
+	// Create a catalog
+	catalog := Catalog{Id: "catalog-1"}
+	if err := db.Create(&catalog).Error; err != nil {
+		t.Fatalf("cannot create catalog: %s", err)
+	}
+
+	// Create a category with composite PK
+	category := Category{Name: "category-1", CatalogId: "catalog-1"}
+	if err := db.Create(&category).Error; err != nil {
+		t.Fatalf("cannot create category: %s", err)
+	}
+
+	// Create a second category
+	category2 := Category{Name: "category-2", CatalogId: "catalog-1"}
+	if err := db.Create(&category2).Error; err != nil {
+		t.Fatalf("cannot create category-2: %s", err)
+	}
+
+	// Create a control referencing the first category - this should succeed
+	control := Control{
+		Id:                "control-1",
+		CategoryName:      "category-1",
+		CategoryCatalogId: "catalog-1",
+	}
+	if err := db.Create(&control).Error; err != nil {
+		t.Fatalf("cannot create control (FK validation should pass): %s", err)
+	}
+
+	// Verify the control was created
+	var count int64
+	if err := db.Model(&Control{}).Count(&count).Error; err != nil {
+		t.Fatalf("cannot count controls: %s", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 control, got %d", count)
+	}
+
+	// Create a control with invalid FK - should fail
+	invalidControl := Control{
+		Id:                "control-2",
+		CategoryName:      "nonexistent",
+		CategoryCatalogId: "catalog-1",
+	}
+	if err := db.Create(&invalidControl).Error; err == nil {
+		t.Fatalf("expected FK violation for invalid category, got nil")
+	}
+
+	// Test DELETE RESTRICT - deleting referenced category should fail
+	// First verify the category exists
+	var countBefore int64
+	if err := db.Model(&Category{}).Where("name = ? AND catalog_id = ?", "category-1", "catalog-1").Count(&countBefore).Error; err != nil {
+		t.Fatalf("cannot count categories before delete: %s", err)
+	}
+	t.Logf("Categories before delete: %d", countBefore)
+	
+	if err := db.Delete(&category).Error; err == nil {
+		t.Fatalf("expected FK restrict error when deleting referenced category, got nil")
+	} else {
+		t.Logf("Delete error (expected): %s", err)
+	}
+
+	// Delete the control first, then the category should succeed
+	if err := db.Delete(&control).Error; err != nil {
+		t.Fatalf("cannot delete control: %s", err)
+	}
+	if err := db.Where("name = ? AND catalog_id = ?", "category-1", "catalog-1").Delete(&Category{}).Error; err != nil {
+		t.Fatalf("cannot delete category after control removed: %s", err)
 	}
 }

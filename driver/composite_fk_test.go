@@ -229,3 +229,65 @@ func TestCompositeForeignKey_Delete(t *testing.T) {
 		t.Fatalf("delete parent after child removed: %s", err)
 	}
 }
+
+// TestCompositeForeignKey_DeletePartialMatch tests that DELETE RESTRICT properly
+// checks ALL columns of a composite FK, not just the first one.
+func TestCompositeForeignKey_DeletePartialMatch(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestCompositeForeignKey_DeletePartialMatch")
+	if err != nil {
+		t.Fatalf("sql.Open : %s", err)
+	}
+	defer db.Close()
+
+	setup := []string{
+		`CREATE TABLE categories (
+			name TEXT,
+			catalog_id TEXT,
+			PRIMARY KEY (name, catalog_id)
+		)`,
+		`CREATE TABLE controls (
+			id TEXT PRIMARY KEY,
+			category_name TEXT,
+			category_catalog_id TEXT,
+			FOREIGN KEY (category_name, category_catalog_id) REFERENCES categories(name, catalog_id)
+		)`,
+	}
+	for _, q := range setup {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("setup failed: %s (query: %s)", err, q)
+		}
+	}
+
+	// Insert two parent rows with same name but different catalog_id
+	if _, err := db.Exec(`INSERT INTO categories (name, catalog_id) VALUES ('cat', 'catalog1')`); err != nil {
+		t.Fatalf("insert parent 1: %s", err)
+	}
+	if _, err := db.Exec(`INSERT INTO categories (name, catalog_id) VALUES ('cat', 'catalog2')`); err != nil {
+		t.Fatalf("insert parent 2: %s", err)
+	}
+
+	// Insert child referencing the first parent
+	if _, err := db.Exec(`INSERT INTO controls (id, category_name, category_catalog_id) VALUES ('c1', 'cat', 'catalog1')`); err != nil {
+		t.Fatalf("insert child: %s", err)
+	}
+
+	// Delete the SECOND parent (not referenced) - should succeed
+	// This tests that we check ALL columns, not just the first one
+	if _, err := db.Exec(`DELETE FROM categories WHERE name = 'cat' AND catalog_id = 'catalog2'`); err != nil {
+		t.Fatalf("delete unreferenced parent (cat, catalog2): %s", err)
+	}
+
+	// Delete the FIRST parent (referenced) - should fail
+	if _, err := db.Exec(`DELETE FROM categories WHERE name = 'cat' AND catalog_id = 'catalog1'`); err == nil {
+		t.Fatalf("expected FK restrict error for referenced parent (cat, catalog1), got nil")
+	}
+
+	// Verify that only the second parent was deleted
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM categories`).Scan(&count); err != nil {
+		t.Fatalf("query count: %s", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 parent row remaining, got %d", count)
+	}
+}
