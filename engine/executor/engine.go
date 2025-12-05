@@ -367,6 +367,24 @@ func insertIntoTableExecutor(t *Tx, insertDecl *parser.Decl, args []NamedValue) 
 	var returningIdx []int
 	relationName := insertDecl.Decl[0].Decl[0].Lexeme
 
+	// Check for ON CONFLICT clause
+	var onConflictDecl *parser.Decl
+	var doUpdateDecl *parser.Decl
+	for i := range insertDecl.Decl {
+		if insertDecl.Decl[i].Token == parser.OnToken {
+			onConflictDecl = insertDecl.Decl[i]
+			// Find the DO clause
+			for _, child := range onConflictDecl.Decl {
+				if child.Token == parser.DoToken && len(child.Decl) > 0 {
+					if child.Decl[0].Token == parser.UpdateToken {
+						doUpdateDecl = child.Decl[0]
+					}
+				}
+			}
+			break
+		}
+	}
+
 	// Check for RETURNING clause
 	if len(insertDecl.Decl) > 2 {
 		for i := range insertDecl.Decl {
@@ -398,20 +416,39 @@ func insertIntoTableExecutor(t *Tx, insertDecl *parser.Decl, args []NamedValue) 
 		if err != nil {
 			return 0, 0, nil, nil, err
 		}
-		tuple, err := t.tx.Insert(schemaName, relationName, values)
-		if err != nil {
-			return 0, 0, nil, nil, err
-		}
-		returningTuple := agnostic.NewTuple()
-		for _, idx := range returningIdx {
-			returningTuple.Append(tuple.Values()[idx])
-		}
-		tuples = append(tuples, returningTuple)
 
-		// guess lastInsertedID
-		if v := tuple.Values(); len(v) > 0 {
-			if reflect.TypeOf(v[0]).ConvertibleTo(reflect.TypeOf(lastInsertedID)) {
-				lastInsertedID = reflect.ValueOf(v[0]).Convert(reflect.TypeOf(lastInsertedID)).Int()
+		var tuple *agnostic.Tuple
+
+		// If ON CONFLICT is present, check for conflict first
+		if onConflictDecl != nil {
+			tuple, err = handleOnConflict(t, schemaName, relationName, values, specifiedAttrs, onConflictDecl, doUpdateDecl)
+			if err != nil {
+				return 0, 0, nil, nil, err
+			}
+			if tuple == nil {
+				// DO NOTHING case - skip this row
+				continue
+			}
+		} else {
+			// No ON CONFLICT clause, do normal insert
+			tuple, err = t.tx.Insert(schemaName, relationName, values)
+			if err != nil {
+				return 0, 0, nil, nil, err
+			}
+		}
+
+		if tuple != nil {
+			returningTuple := agnostic.NewTuple()
+			for _, idx := range returningIdx {
+				returningTuple.Append(tuple.Values()[idx])
+			}
+			tuples = append(tuples, returningTuple)
+
+			// guess lastInsertedID
+			if v := tuple.Values(); len(v) > 0 {
+				if reflect.TypeOf(v[0]).ConvertibleTo(reflect.TypeOf(lastInsertedID)) {
+					lastInsertedID = reflect.ValueOf(v[0]).Convert(reflect.TypeOf(lastInsertedID)).Int()
+				}
 			}
 		}
 	}
@@ -421,6 +458,156 @@ func insertIntoTableExecutor(t *Tx, insertDecl *parser.Decl, args []NamedValue) 
 	}
 
 	return lastInsertedID, int64(len(tuples)), returningAttrs, tuples, nil
+}
+
+// handleOnConflict handles the ON CONFLICT clause for INSERT statements.
+// It returns the resulting tuple (from insert or update), or nil if DO NOTHING was specified.
+func handleOnConflict(t *Tx, schemaName, relationName string, values map[string]any, specifiedAttrs []string, onConflictDecl, doUpdateDecl *parser.Decl) (*agnostic.Tuple, error) {
+	hasConflict, err := t.tx.CheckPrimaryKeyConflict(schemaName, relationName, values)
+	if err != nil {
+		return nil, err
+	}
+
+	if !hasConflict {
+		// No conflict, do normal insert
+		return t.tx.Insert(schemaName, relationName, values)
+	}
+
+	// Validate ON CONFLICT clause structure
+	if len(onConflictDecl.Decl) < 2 {
+		return nil, fmt.Errorf("invalid ON CONFLICT clause structure")
+	}
+
+	// Check if it's DO NOTHING
+	doDecl := onConflictDecl.Decl[1] // DoToken
+	if doDecl.Token != parser.DoToken {
+		return nil, fmt.Errorf("unexpected ON CONFLICT clause structure: missing DO token")
+	}
+	if len(doDecl.Decl) > 0 && doDecl.Decl[0].Token == parser.NothingToken {
+		// DO NOTHING - return nil to signal skipping this row
+		return nil, nil
+	}
+
+	if doUpdateDecl == nil {
+		return nil, fmt.Errorf("ON CONFLICT DO UPDATE specified but UPDATE clause not found")
+	}
+
+	// Get the conflict target columns
+	conflictDecl := onConflictDecl.Decl[0] // ConflictToken
+	if conflictDecl.Token != parser.ConflictToken {
+		return nil, fmt.Errorf("invalid ON CONFLICT clause structure: missing CONFLICT token")
+	}
+	var conflictCols []string
+	for _, colDecl := range conflictDecl.Decl {
+		conflictCols = append(conflictCols, strings.ToLower(colDecl.Lexeme))
+	}
+
+	// Build predicate for the conflicting row
+	predicate := buildConflictPredicate(relationName, conflictCols, values)
+	if predicate == nil {
+		return nil, fmt.Errorf("conflict target columns must have values in the INSERT statement")
+	}
+
+	// Get the SET clause values
+	updateValues := extractUpdateValues(doUpdateDecl, values)
+
+	// Perform the update - use star selector to include all columns for RETURNING and DO UPDATE SET
+	selectors := []agnostic.Selector{agnostic.NewStarSelector(relationName)}
+	_, updatedTuples, err := t.tx.Update(schemaName, relationName, updateValues, selectors, predicate)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(updatedTuples) > 0 {
+		return updatedTuples[0], nil
+	}
+
+	return nil, fmt.Errorf("internal error: conflict detected but no matching rows found for update")
+}
+
+// buildConflictPredicate builds a predicate to match the conflicting row based on conflict columns.
+func buildConflictPredicate(relationName string, conflictCols []string, values map[string]any) agnostic.Predicate {
+	var predicates []agnostic.Predicate
+	for _, col := range conflictCols {
+		if val, ok := values[col]; ok {
+			p := agnostic.NewEqPredicate(
+				agnostic.NewAttributeValueFunctor(relationName, col),
+				agnostic.NewConstValueFunctor(val),
+			)
+			predicates = append(predicates, p)
+		}
+	}
+
+	if len(predicates) == 0 {
+		return nil
+	}
+	if len(predicates) == 1 {
+		return predicates[0]
+	}
+
+	predicate := agnostic.NewAndPredicate(predicates[0], predicates[1])
+	for i := 2; i < len(predicates); i++ {
+		predicate = agnostic.NewAndPredicate(predicate, predicates[i])
+	}
+	return predicate
+}
+
+// extractUpdateValues extracts the column values to update from the DO UPDATE SET clause.
+// It handles "excluded"."column" references by looking up values from the INSERT values.
+func extractUpdateValues(doUpdateDecl *parser.Decl, insertValues map[string]any) map[string]any {
+	if doUpdateDecl == nil || len(doUpdateDecl.Decl) == 0 {
+		return make(map[string]any)
+	}
+	setDecl := doUpdateDecl.Decl[0] // SetToken
+	updateValues := make(map[string]any)
+
+	for _, attrDecl := range setDecl.Decl {
+		colName := strings.ToLower(attrDecl.Lexeme)
+		if len(attrDecl.Decl) == 0 {
+			continue
+		}
+
+		valueAttrDecl := attrDecl.Decl[0]
+		// Check if this is "excluded"."column" reference
+		if len(valueAttrDecl.Decl) > 0 {
+			// This is a qualified name like excluded.column
+			refCol := strings.ToLower(valueAttrDecl.Lexeme)
+			tableName := strings.ToLower(valueAttrDecl.Decl[0].Lexeme)
+			if tableName == "excluded" {
+				// Use the value from the INSERT values
+				if val, ok := insertValues[refCol]; ok {
+					updateValues[colName] = val
+				}
+			}
+		} else {
+			// Direct value reference
+			var typeName string
+			switch valueAttrDecl.Token {
+			case parser.IntToken, parser.NumberToken:
+				typeName = "bigint"
+			case parser.DateToken:
+				typeName = "timestamp"
+			case parser.TextToken:
+				typeName = "text"
+			case parser.FloatToken:
+				typeName = "float"
+			default:
+				typeName = "text"
+				if _, err := agnostic.ToInstance(valueAttrDecl.Lexeme, "timestamp"); err == nil {
+					typeName = "timestamp"
+				}
+			}
+			v, err := agnostic.ToInstance(valueAttrDecl.Lexeme, typeName)
+			if err != nil {
+				// fallback to string if conversion fails
+				updateValues[colName] = valueAttrDecl.Lexeme
+			} else {
+				updateValues[colName] = v
+			}
+		}
+	}
+
+	return updateValues
 }
 
 func getValues(specifiedAttrs []string, valuesDecl *parser.Decl, args []NamedValue) (map[string]any, error) {
