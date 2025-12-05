@@ -2202,51 +2202,91 @@ func (u *Updater) enforceParentRestrictOnUpdate(changed map[string]fieldChange, 
 		return nil
 	}
 
+	// Get parent relation for attrIndex
+	ps, err := u.txn.e.schema(u.schema)
+	if err != nil {
+		return err
+	}
+	pr, err := ps.Relation(u.rel)
+	if err != nil {
+		return err
+	}
+
 	for schName, sch := range u.txn.e.schemas {
 		for childName, childRel := range sch.relations {
-			// Column-level FKs
-			for _, at := range childRel.attributes {
-				if at.fk == nil {
-					continue
-				}
-				refSchema := at.fk.RefSchema()
+			// Group child FKs and check each unique FK
+			childFKs := uniqueRelationFKs(childRel)
+			for _, fk := range childFKs {
+				refSchema := fk.RefSchema()
 				if refSchema == "" {
 					refSchema = schName
 				}
-				if refSchema != u.schema || at.fk.RefRelation() != u.rel {
+				if refSchema != u.schema || fk.RefRelation() != u.rel {
 					continue
 				}
-				// Resolve referenced column
-				refCols := at.fk.RefColumns()
-				var refCol string
-				if len(refCols) > 0 {
-					refCol = refCols[0]
-				} else {
-					// parent PK single-column only
-					ps, err := u.txn.e.schema(u.schema)
-					if err != nil {
-						return err
+
+				// Get referenced columns (or use parent PK if not specified)
+				refCols := fk.RefColumns()
+				if len(refCols) == 0 {
+					// Reference parent PK
+					if len(pr.pk) != len(fk.LocalColumns()) {
+						return fmt.Errorf("update restrict: FK on %s.%s has %d columns but parent PK on %s.%s has %d columns", schName, childName, len(fk.LocalColumns()), u.schema, u.rel, len(pr.pk))
 					}
-					pr, err := ps.Relation(u.rel)
-					if err != nil {
-						return err
+					for _, pkIdx := range pr.pk {
+						refCols = append(refCols, pr.attributes[pkIdx].name)
 					}
-					if len(pr.pk) != 1 {
-						return fmt.Errorf("update restrict not supported for composite primary key on %s.%s", u.schema, u.rel)
-					}
-					refCol = pr.attributes[pr.pk[0]].name
 				}
-				// If referenced column isn't being changed, skip
-				ch, ok := changed[refCol]
-				if !ok {
+
+				// Check if any of the referenced columns are being changed
+				anyRefColChanged := false
+				for _, refCol := range refCols {
+					if _, ok := changed[refCol]; ok {
+						anyRefColChanged = true
+						break
+					}
+				}
+				if !anyRefColChanged {
 					continue
 				}
-				// Direct scan on child relation: child.at.name == old parent value
-				cidx := childRel.attrIndex[at.name]
+
+				// For composite FK, we need to check if the OLD combination of parent values
+				// matches any child row. Get old parent values for all ref columns
+				oldParentVals := make(map[string]any)
+				for _, refCol := range refCols {
+					pidx, ok := pr.attrIndex[refCol]
+					if !ok {
+						return fmt.Errorf("referenced column %s not found in parent %s.%s", refCol, u.schema, u.rel)
+					}
+					// Use old value if changed, current value otherwise
+					if ch, ok := changed[refCol]; ok {
+						oldParentVals[refCol] = ch.old
+					} else {
+						oldParentVals[refCol] = original.values[pidx]
+					}
+				}
+
+				// Scan child relation to see if any row references this old parent combination
 				for ce := childRel.rows.Front(); ce != nil; ce = ce.Next() {
-					cv := ce.Value.(*Tuple).values[cidx]
-					if ok, _ := equal(cv, ch.old); ok {
-						return fmt.Errorf("update violates foreign key: %s.%s is referenced by %s.%s", u.rel, refCol, schName, childName)
+					childTuple := ce.Value.(*Tuple)
+					allMatch := true
+					for i, localCol := range fk.LocalColumns() {
+						refCol := refCols[i]
+						cidx, ok := childRel.attrIndex[localCol]
+						if !ok {
+							return fmt.Errorf("child FK column %s not found in %s.%s", localCol, schName, childName)
+						}
+						childVal := childTuple.values[cidx]
+						parentVal := oldParentVals[refCol]
+						if match, _ := equal(childVal, parentVal); !match {
+							allMatch = false
+							break
+						}
+					}
+					if allMatch {
+						// Found a child row that references the old parent values
+						localColsStr := strings.Join(fk.LocalColumns(), ", ")
+						refColsStr := strings.Join(refCols, ", ")
+						return fmt.Errorf("update violates foreign key: %s.%s(%s) is referenced by %s.%s(%s)", u.rel, refColsStr, refColsStr, schName, childName, localColsStr)
 					}
 				}
 			}
@@ -2259,26 +2299,50 @@ func (u *Updater) enforceParentRestrictOnUpdate(changed map[string]fieldChange, 
 // (both attribute-level and relation-level). It uses the planner to check existence on
 // referenced relations when needed.
 func (u *Updater) enforceChildFKs(newt *Tuple, cols []string) error {
-	for i, attr := range u.attributes {
-		if attr.fk == nil {
+	// Get relation to access attrIndex
+	s, err := u.txn.e.schema(u.schema)
+	if err != nil {
+		return err
+	}
+	r, err := s.Relation(u.rel)
+	if err != nil {
+		return err
+	}
+
+	// Group FKs by signature and validate each unique FK once with composite predicates
+	fks := uniqueRelationFKs(r)
+	for _, fk := range fks {
+		// Build map of local column name to value from the updated tuple
+		localVals := make(map[string]any)
+		hasNonNull := false
+		for _, localCol := range fk.LocalColumns() {
+			idx, ok := r.attrIndex[localCol]
+			if !ok {
+				return fmt.Errorf("FK local column %s not found in relation %s", localCol, u.rel)
+			}
+			val := newt.values[idx]
+			localVals[localCol] = val
+			if val != nil {
+				hasNonNull = true
+			}
+		}
+
+		// If all FK columns are NULL, skip validation (NULL FK is allowed)
+		if !hasNonNull {
 			continue
 		}
-		// if the column changed to nil, skip; else ensure referenced exists
-		val := newt.values[i]
-		if val == nil {
-			continue
-		}
-		refSchema := attr.fk.RefSchema()
+
+		// Determine ref schema and relation
+		refSchema := fk.RefSchema()
 		if refSchema == "" {
 			refSchema = u.schema
 		}
-		refRel := attr.fk.RefRelation()
-		refCols := attr.fk.RefColumns()
-		var refCol string
-		if len(refCols) > 0 {
-			refCol = refCols[0]
-		} else {
-			// parent PK single-column only
+		refRel := fk.RefRelation()
+
+		// Get referenced columns (or use parent PK if not specified)
+		refCols := fk.RefColumns()
+		if len(refCols) == 0 {
+			// Reference parent PK
 			ps, err := u.txn.e.schema(refSchema)
 			if err != nil {
 				return err
@@ -2287,13 +2351,45 @@ func (u *Updater) enforceChildFKs(newt *Tuple, cols []string) error {
 			if err != nil {
 				return err
 			}
-			if len(pr.pk) != 1 {
-				return fmt.Errorf("foreign key on %s.%s references composite/unknown key not supported yet", u.rel, attr.name)
+			// For composite FK, parent PK must match in size
+			if len(pr.pk) != len(fk.LocalColumns()) {
+				return fmt.Errorf("foreign key on %s has %d columns but referenced PK on %s.%s has %d columns", u.rel, len(fk.LocalColumns()), refSchema, refRel, len(pr.pk))
 			}
-			refCol = pr.attributes[pr.pk[0]].name
+			for _, pkIdx := range pr.pk {
+				refCols = append(refCols, pr.attributes[pkIdx].name)
+			}
 		}
-		p := NewEqPredicate(NewAttributeValueFunctor(refRel, refCol), NewConstValueFunctor(val))
-		n, err := u.txn.Plan(refSchema, nil, p, nil, nil)
+
+		// Ensure FK and ref columns match in count
+		if len(fk.LocalColumns()) != len(refCols) {
+			return fmt.Errorf("foreign key on %s has %d columns but references %d columns on %s.%s", u.rel, len(fk.LocalColumns()), len(refCols), refSchema, refRel)
+		}
+
+		// Build composite predicate: refCol1=val1 AND refCol2=val2 AND ...
+		var pred Predicate
+		for i, localCol := range fk.LocalColumns() {
+			refCol := refCols[i]
+			val := localVals[localCol]
+			// For composite FK, if any column is NULL, the entire FK is NULL -> skip
+			if val == nil {
+				pred = nil
+				break
+			}
+			eqPred := NewEqPredicate(NewAttributeValueFunctor(refRel, refCol), NewConstValueFunctor(val))
+			if pred == nil {
+				pred = eqPred
+			} else {
+				pred = NewAndPredicate(pred, eqPred)
+			}
+		}
+
+		// If predicate is nil (some column was NULL), skip this FK
+		if pred == nil {
+			continue
+		}
+
+		// Check existence in parent relation
+		n, err := u.txn.Plan(refSchema, nil, pred, nil, nil)
 		if err != nil {
 			return err
 		}
@@ -2302,7 +2398,10 @@ func (u *Updater) enforceChildFKs(newt *Tuple, cols []string) error {
 			return err
 		}
 		if len(rows) == 0 {
-			return fmt.Errorf("update violates foreign key: %s.%s references %s.%s", u.rel, attr.name, refRel, refCol)
+			// Build a readable error message
+			localColsStr := strings.Join(fk.LocalColumns(), ", ")
+			refColsStr := strings.Join(refCols, ", ")
+			return fmt.Errorf("update violates foreign key: %s(%s) references %s.%s(%s)", u.rel, localColsStr, refSchema, refRel, refColsStr)
 		}
 	}
 
