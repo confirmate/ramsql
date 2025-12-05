@@ -59,7 +59,11 @@ func resolveIntParameter(decl *parser.Decl, args []NamedValue, clauseName string
 		if err != nil {
 			return 0, fmt.Errorf("wrong %s parameter: %s", clauseName, err)
 		}
-		if int(idx) > len(args) {
+		// PostgreSQL parameters are 1-indexed ($1, $2, ...)
+		if idx < 1 {
+			return 0, fmt.Errorf("%s parameter index must be >= 1, got $%d", clauseName, idx)
+		}
+		if idx > int64(len(args)) {
 			argWord := "argument"
 			if len(args) != 1 {
 				argWord = "arguments"
