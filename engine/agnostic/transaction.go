@@ -591,100 +591,8 @@ func (t *Transaction) Insert(schema, relation string, values map[string]any) (*T
 	}
 
 	// Validate foreign keys after tuple is complete
-	// Group FKs by signature and validate each unique FK once with composite predicates
-	fks := uniqueRelationFKs(r)
-	for _, fk := range fks {
-		// Build map of local column name to value
-		localVals := make(map[string]any)
-		hasNonNull := false
-		for _, localCol := range fk.LocalColumns() {
-			idx, ok := r.attrIndex[localCol]
-			if !ok {
-				return nil, t.abort(fmt.Errorf("FK local column %s not found in relation %s", localCol, relation))
-			}
-			val := tuple.values[idx]
-			localVals[localCol] = val
-			if val != nil {
-				hasNonNull = true
-			}
-		}
-
-		// If all FK columns are NULL, skip validation (NULL FK is allowed)
-		if !hasNonNull {
-			continue
-		}
-
-		// Determine ref schema and relation
-		refSchema := fk.RefSchema()
-		if refSchema == "" {
-			refSchema = schema
-		}
-		refRel := fk.RefRelation()
-
-		// Get referenced columns (or use parent PK if not specified)
-		refCols := fk.RefColumns()
-		if len(refCols) == 0 {
-			// Reference parent PK
-			ps, err := t.e.schema(refSchema)
-			if err != nil {
-				return nil, t.abort(err)
-			}
-			pr, err := ps.Relation(refRel)
-			if err != nil {
-				return nil, t.abort(err)
-			}
-			// For composite FK, parent PK must match in size
-			if len(pr.pk) != len(fk.LocalColumns()) {
-				return nil, t.abort(fmt.Errorf("foreign key on %s has %d columns but referenced PK on %s.%s has %d columns", relation, len(fk.LocalColumns()), refSchema, refRel, len(pr.pk)))
-			}
-			for _, pkIdx := range pr.pk {
-				refCols = append(refCols, pr.attributes[pkIdx].name)
-			}
-		}
-
-		// Ensure FK and ref columns match in count
-		if len(fk.LocalColumns()) != len(refCols) {
-			return nil, t.abort(fmt.Errorf("foreign key on %s has %d columns but references %d columns on %s.%s", relation, len(fk.LocalColumns()), len(refCols), refSchema, refRel))
-		}
-
-		// Build composite predicate: refCol1=val1 AND refCol2=val2 AND ...
-		var pred Predicate
-		for i, localCol := range fk.LocalColumns() {
-			refCol := refCols[i]
-			val := localVals[localCol]
-			// For composite FK, if any column is NULL, the entire FK is NULL -> skip
-			if val == nil {
-				pred = nil
-				break
-			}
-			eqPred := NewEqPredicate(NewAttributeValueFunctor(refRel, refCol), NewConstValueFunctor(val))
-			if pred == nil {
-				pred = eqPred
-			} else {
-				pred = NewAndPredicate(pred, eqPred)
-			}
-		}
-
-		// If predicate is nil (some column was NULL), skip this FK
-		if pred == nil {
-			continue
-		}
-
-		// Check existence in parent relation
-		n, err := t.Plan(refSchema, nil, pred, nil, nil)
-		if err != nil {
-			return nil, t.abort(err)
-		}
-		_, rows, err := n.Exec()
-		if err != nil {
-			return nil, t.abort(err)
-		}
-		if len(rows) == 0 {
-			// Build a readable error message
-			localColsStr := strings.Join(fk.LocalColumns(), ", ")
-			refColsStr := strings.Join(refCols, ", ")
-			return nil, t.abort(fmt.Errorf("insert violates foreign key: %s.%s(%s) references %s.%s(%s)", schema, relation, localColsStr, refSchema, refRel, refColsStr))
-		}
+	if err := t.validateForeignKeys(schema, relation, r, tuple); err != nil {
+		return nil, err
 	}
 
 	// check primary key violation
@@ -714,6 +622,108 @@ func (t *Transaction) Insert(schema, relation string, values map[string]any) (*T
 	t.changes.PushBack(c)
 
 	return tuple, nil
+}
+
+// validateForeignKeys checks that all foreign key constraints are satisfied for the given tuple.
+// For composite FKs, it validates all columns together using AND predicates.
+// Returns an error (already passed through t.abort) if any FK constraint is violated.
+func (t *Transaction) validateForeignKeys(schema, relation string, r *Relation, tuple *Tuple) error {
+	// Group FKs by signature and validate each unique FK once with composite predicates
+	fks := uniqueRelationFKs(r)
+	for _, fk := range fks {
+		// Build map of local column name to value
+		localVals := make(map[string]any)
+		hasNonNull := false
+		for _, localCol := range fk.LocalColumns() {
+			idx, ok := r.attrIndex[localCol]
+			if !ok {
+				return t.abort(fmt.Errorf("FK local column %s not found in relation %s", localCol, relation))
+			}
+			val := tuple.values[idx]
+			localVals[localCol] = val
+			if val != nil {
+				hasNonNull = true
+			}
+		}
+
+		// If all FK columns are NULL, skip validation (NULL FK is allowed)
+		if !hasNonNull {
+			continue
+		}
+
+		// Determine ref schema and relation
+		refSchema := fk.RefSchema()
+		if refSchema == "" {
+			refSchema = schema
+		}
+		refRel := fk.RefRelation()
+
+		// Get referenced columns (or use parent PK if not specified)
+		refCols := fk.RefColumns()
+		if len(refCols) == 0 {
+			// Reference parent PK
+			ps, err := t.e.schema(refSchema)
+			if err != nil {
+				return t.abort(err)
+			}
+			pr, err := ps.Relation(refRel)
+			if err != nil {
+				return t.abort(err)
+			}
+			// For composite FK, parent PK must match in size
+			if len(pr.pk) != len(fk.LocalColumns()) {
+				return t.abort(fmt.Errorf("foreign key on %s has %d columns but referenced PK on %s.%s has %d columns", relation, len(fk.LocalColumns()), refSchema, refRel, len(pr.pk)))
+			}
+			for _, pkIdx := range pr.pk {
+				refCols = append(refCols, pr.attributes[pkIdx].name)
+			}
+		}
+
+		// Ensure FK and ref columns match in count
+		if len(fk.LocalColumns()) != len(refCols) {
+			return t.abort(fmt.Errorf("foreign key on %s has %d columns but references %d columns on %s.%s", relation, len(fk.LocalColumns()), len(refCols), refSchema, refRel))
+		}
+
+		// Build composite predicate: refCol1=val1 AND refCol2=val2 AND ...
+		var pred Predicate
+		for i, localCol := range fk.LocalColumns() {
+			refCol := refCols[i]
+			val := localVals[localCol]
+			// For composite FK, if any column is NULL, the entire FK is NULL -> skip
+			if val == nil {
+				pred = nil
+				break
+			}
+			eqPred := NewEqPredicate(NewAttributeValueFunctor(refRel, refCol), NewConstValueFunctor(val))
+			if pred == nil {
+				pred = eqPred
+			} else {
+				pred = NewAndPredicate(pred, eqPred)
+			}
+		}
+
+		// If predicate is nil (some column was NULL), skip this FK
+		if pred == nil {
+			continue
+		}
+
+		// Check existence in parent relation
+		n, err := t.Plan(refSchema, nil, pred, nil, nil)
+		if err != nil {
+			return t.abort(err)
+		}
+		_, rows, err := n.Exec()
+		if err != nil {
+			return t.abort(err)
+		}
+		if len(rows) == 0 {
+			// Build a readable error message
+			localColsStr := strings.Join(fk.LocalColumns(), ", ")
+			refColsStr := strings.Join(refCols, ", ")
+			return t.abort(fmt.Errorf("insert violates foreign key: %s.%s(%s) references %s.%s(%s)", schema, relation, localColsStr, refSchema, refRel, refColsStr))
+		}
+	}
+	return nil
 }
 
 // Query data from relations
