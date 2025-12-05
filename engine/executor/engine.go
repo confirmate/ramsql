@@ -48,6 +48,58 @@ func (e *Engine) Begin() (*Tx, error) {
 func (e *Engine) Stop() {
 }
 
+// resolveIntParameter resolves a parameter token to an integer value.
+// It supports PostgreSQL-style ($1, $2, ...) and named parameters (:name).
+// Returns the resolved integer value or an error.
+func resolveIntParameter(decl *parser.Decl, args []NamedValue, clauseName string) (int64, error) {
+	switch decl.Token {
+	case parser.ArgToken:
+		// Handle PostgreSQL-style parameter like $1, $2, etc.
+		idx, err := strconv.ParseInt(decl.Lexeme, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("wrong %s parameter: %s", clauseName, err)
+		}
+		if int(idx) > len(args) {
+			argWord := "argument"
+			if len(args) != 1 {
+				argWord = "arguments"
+			}
+			return 0, fmt.Errorf("reference to $%s in %s, but only %d %s provided", decl.Lexeme, clauseName, len(args), argWord)
+		}
+		// Convert the argument value to int64
+		switch v := args[idx-1].Value.(type) {
+		case int:
+			return int64(v), nil
+		case int64:
+			return v, nil
+		case int32:
+			return int64(v), nil
+		default:
+			return 0, fmt.Errorf("%s parameter must be an integer, got %T", clauseName, v)
+		}
+	case parser.NamedArgToken:
+		// Handle named parameter like :name
+		for _, arg := range args {
+			if arg.Name == decl.Lexeme {
+				switch v := arg.Value.(type) {
+				case int:
+					return int64(v), nil
+				case int64:
+					return v, nil
+				case int32:
+					return int64(v), nil
+				default:
+					return 0, fmt.Errorf("%s parameter must be an integer, got %T", clauseName, v)
+				}
+			}
+		}
+		return 0, fmt.Errorf("named parameter %s not found in arguments", decl.Lexeme)
+	default:
+		// Handle direct number
+		return strconv.ParseInt(decl.Lexeme, 10, 64)
+	}
+}
+
 func createExecutor(t *Tx, decl *parser.Decl, args []NamedValue) (int64, int64, []string, []*agnostic.Tuple, error) {
 
 	if len(decl.Decl) == 0 {
@@ -801,76 +853,11 @@ func selectExecutor(t *Tx, selectDecl *parser.Decl, args []NamedValue) (int64, i
 			joiners = append(joiners, j)
 		case parser.OffsetToken:
 			offsetDecl := selectDecl.Decl[i].Decl[0]
-			var offset int
-			var err error
-			
-			switch offsetDecl.Token {
-			case parser.ArgToken:
-				// Handle parameter like $1 or ?
-				var idx int64
-				var paramName string
-				if offsetDecl.Lexeme == "?" {
-					// TODO: ODBC-style '?' parameters require tracking ordinal position across the entire query.
-					// For now, we assume OFFSET is the first/only parameter, which works for simple queries
-					// but may fail with complex queries having multiple '?' parameters.
-					// PostgreSQL-style $1, $2, etc. is fully supported and recommended.
-					idx = 1
-					paramName = "?"
-				} else {
-					idx, err = strconv.ParseInt(offsetDecl.Lexeme, 10, 64)
-					if err != nil {
-						return 0, 0, nil, nil, fmt.Errorf("wrong offset parameter: %s", err)
-					}
-					paramName = "$" + offsetDecl.Lexeme
-				}
-				if int(idx) > len(args) {
-					argWord := "argument"
-					if len(args) != 1 {
-						argWord = "arguments"
-					}
-					return 0, 0, nil, nil, fmt.Errorf("reference to %s in OFFSET, but only %d %s provided", paramName, len(args), argWord)
-				}
-				// Convert the argument value to int
-				switch v := args[idx-1].Value.(type) {
-				case int:
-					offset = v
-				case int64:
-					offset = int(v)
-				case int32:
-					offset = int(v)
-				default:
-					return 0, 0, nil, nil, fmt.Errorf("OFFSET parameter must be an integer, got %T", v)
-				}
-			case parser.NamedArgToken:
-				// Handle named parameter like :name
-				found := false
-				for _, arg := range args {
-					if arg.Name == offsetDecl.Lexeme {
-						switch v := arg.Value.(type) {
-						case int:
-							offset = v
-						case int64:
-							offset = int(v)
-						case int32:
-							offset = int(v)
-						default:
-							return 0, 0, nil, nil, fmt.Errorf("OFFSET parameter must be an integer, got %T", v)
-						}
-						found = true
-						break
-					}
-				}
-				if !found {
-					return 0, 0, nil, nil, fmt.Errorf("named parameter %s not found in arguments", offsetDecl.Lexeme)
-				}
-			default:
-				// Handle direct number
-				offset, err = strconv.Atoi(offsetDecl.Lexeme)
-				if err != nil {
-					return 0, 0, nil, nil, fmt.Errorf("wrong offset value: %s", err)
-				}
+			offsetValue, err := resolveIntParameter(offsetDecl, args, "OFFSET")
+			if err != nil {
+				return 0, 0, nil, nil, err
 			}
-			s := agnostic.NewOffsetSorter(offset)
+			s := agnostic.NewOffsetSorter(int(offsetValue))
 			sorters = append(sorters, s)
 		case parser.DistinctToken:
 			s, err := t.getDistinctSorter("", selectDecl.Decl[i], selectDecl.Decl[i+1].Lexeme)
@@ -886,74 +873,9 @@ func selectExecutor(t *Tx, selectDecl *parser.Decl, args []NamedValue) (int64, i
 			sorters = append(sorters, s)
 		case parser.LimitToken:
 			limitDecl := selectDecl.Decl[i].Decl[0]
-			var limit int64
-			var err error
-			
-			switch limitDecl.Token {
-			case parser.ArgToken:
-				// Handle parameter like $1 or ?
-				var idx int64
-				var paramName string
-				if limitDecl.Lexeme == "?" {
-					// TODO: ODBC-style '?' parameters require tracking ordinal position across the entire query.
-					// For now, we assume LIMIT is the first/only parameter, which works for simple queries
-					// but may fail with complex queries having multiple '?' parameters.
-					// PostgreSQL-style $1, $2, etc. is fully supported and recommended.
-					idx = 1
-					paramName = "?"
-				} else {
-					idx, err = strconv.ParseInt(limitDecl.Lexeme, 10, 64)
-					if err != nil {
-						return 0, 0, nil, nil, fmt.Errorf("wrong limit parameter: %s", err)
-					}
-					paramName = "$" + limitDecl.Lexeme
-				}
-				if int(idx) > len(args) {
-					argWord := "argument"
-					if len(args) != 1 {
-						argWord = "arguments"
-					}
-					return 0, 0, nil, nil, fmt.Errorf("reference to %s in LIMIT, but only %d %s provided", paramName, len(args), argWord)
-				}
-				// Convert the argument value to int64
-				switch v := args[idx-1].Value.(type) {
-				case int:
-					limit = int64(v)
-				case int64:
-					limit = v
-				case int32:
-					limit = int64(v)
-				default:
-					return 0, 0, nil, nil, fmt.Errorf("LIMIT parameter must be an integer, got %T", v)
-				}
-			case parser.NamedArgToken:
-				// Handle named parameter like :name
-				found := false
-				for _, arg := range args {
-					if arg.Name == limitDecl.Lexeme {
-						switch v := arg.Value.(type) {
-						case int:
-							limit = int64(v)
-						case int64:
-							limit = v
-						case int32:
-							limit = int64(v)
-						default:
-							return 0, 0, nil, nil, fmt.Errorf("LIMIT parameter must be an integer, got %T", v)
-						}
-						found = true
-						break
-					}
-				}
-				if !found {
-					return 0, 0, nil, nil, fmt.Errorf("named parameter %s not found in arguments", limitDecl.Lexeme)
-				}
-			default:
-				// Handle direct number
-				limit, err = strconv.ParseInt(limitDecl.Lexeme, 10, 64)
-				if err != nil {
-					return 0, 0, nil, nil, fmt.Errorf("wrong limit value: %s", err)
-				}
+			limit, err := resolveIntParameter(limitDecl, args, "LIMIT")
+			if err != nil {
+				return 0, 0, nil, nil, err
 			}
 			s := agnostic.NewLimitSorter(limit)
 			sorters = append(sorters, s)
