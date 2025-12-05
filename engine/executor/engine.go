@@ -809,8 +809,10 @@ func selectExecutor(t *Tx, selectDecl *parser.Decl, args []NamedValue) (int64, i
 				// Handle parameter like $1 or ?
 				var idx int64
 				if offsetDecl.Lexeme == "?" {
-					// ODBC-style parameter - we'd need to track position
-					// For now, assume it's the first parameter
+					// TODO: ODBC-style '?' parameters require tracking ordinal position across the entire query.
+					// For now, we assume OFFSET is the first/only parameter, which works for simple queries
+					// but may fail with complex queries having multiple '?' parameters.
+					// PostgreSQL-style $1, $2, etc. is fully supported and recommended.
 					idx = 1
 				} else {
 					idx, err = strconv.ParseInt(offsetDecl.Lexeme, 10, 64)
@@ -819,7 +821,11 @@ func selectExecutor(t *Tx, selectDecl *parser.Decl, args []NamedValue) (int64, i
 					}
 				}
 				if len(args) <= int(idx)-1 {
-					return 0, 0, nil, nil, fmt.Errorf("reference to $%s in OFFSET, but only %d argument provided", offsetDecl.Lexeme, len(args))
+					argWord := "argument"
+					if len(args) != 1 {
+						argWord = "arguments"
+					}
+					return 0, 0, nil, nil, fmt.Errorf("reference to $%s in OFFSET, but only %d %s provided", offsetDecl.Lexeme, len(args), argWord)
 				}
 				// Convert the argument value to int
 				switch v := args[idx-1].Value.(type) {
@@ -885,8 +891,10 @@ func selectExecutor(t *Tx, selectDecl *parser.Decl, args []NamedValue) (int64, i
 				// Handle parameter like $1 or ?
 				var idx int64
 				if limitDecl.Lexeme == "?" {
-					// ODBC-style parameter - we'd need to track position
-					// For now, assume it's the first parameter
+					// TODO: ODBC-style '?' parameters require tracking ordinal position across the entire query.
+					// For now, we assume LIMIT is the first/only parameter, which works for simple queries
+					// but may fail with complex queries having multiple '?' parameters.
+					// PostgreSQL-style $1, $2, etc. is fully supported and recommended.
 					idx = 1
 				} else {
 					idx, err = strconv.ParseInt(limitDecl.Lexeme, 10, 64)
@@ -895,7 +903,11 @@ func selectExecutor(t *Tx, selectDecl *parser.Decl, args []NamedValue) (int64, i
 					}
 				}
 				if len(args) <= int(idx)-1 {
-					return 0, 0, nil, nil, fmt.Errorf("reference to $%s in LIMIT, but only %d argument provided", limitDecl.Lexeme, len(args))
+					argWord := "argument"
+					if len(args) != 1 {
+						argWord = "arguments"
+					}
+					return 0, 0, nil, nil, fmt.Errorf("reference to $%s in LIMIT, but only %d %s provided", limitDecl.Lexeme, len(args), argWord)
 				}
 				// Convert the argument value to int64
 				switch v := args[idx-1].Value.(type) {
