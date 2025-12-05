@@ -800,9 +800,66 @@ func selectExecutor(t *Tx, selectDecl *parser.Decl, args []NamedValue) (int64, i
 			}
 			joiners = append(joiners, j)
 		case parser.OffsetToken:
-			offset, err := strconv.Atoi(selectDecl.Decl[i].Decl[0].Lexeme)
-			if err != nil {
-				return 0, 0, nil, nil, fmt.Errorf("wrong offset value: %s", err)
+			offsetDecl := selectDecl.Decl[i].Decl[0]
+			var offset int
+			var err error
+			
+			switch offsetDecl.Token {
+			case parser.ArgToken:
+				// Handle parameter like $1 or ?
+				var idx int64
+				if offsetDecl.Lexeme == "?" {
+					// ODBC-style parameter - we'd need to track position
+					// For now, assume it's the first parameter
+					idx = 1
+				} else {
+					idx, err = strconv.ParseInt(offsetDecl.Lexeme, 10, 64)
+					if err != nil {
+						return 0, 0, nil, nil, fmt.Errorf("wrong offset parameter: %s", err)
+					}
+				}
+				if len(args) <= int(idx)-1 {
+					return 0, 0, nil, nil, fmt.Errorf("reference to $%s in OFFSET, but only %d argument provided", offsetDecl.Lexeme, len(args))
+				}
+				// Convert the argument value to int
+				switch v := args[idx-1].Value.(type) {
+				case int:
+					offset = v
+				case int64:
+					offset = int(v)
+				case int32:
+					offset = int(v)
+				default:
+					return 0, 0, nil, nil, fmt.Errorf("OFFSET parameter must be an integer, got %T", v)
+				}
+			case parser.NamedArgToken:
+				// Handle named parameter like :name
+				found := false
+				for _, arg := range args {
+					if arg.Name == offsetDecl.Lexeme {
+						switch v := arg.Value.(type) {
+						case int:
+							offset = v
+						case int64:
+							offset = int(v)
+						case int32:
+							offset = int(v)
+						default:
+							return 0, 0, nil, nil, fmt.Errorf("OFFSET parameter must be an integer, got %T", v)
+						}
+						found = true
+						break
+					}
+				}
+				if !found {
+					return 0, 0, nil, nil, fmt.Errorf("named parameter %s not found in arguments", offsetDecl.Lexeme)
+				}
+			default:
+				// Handle direct number
+				offset, err = strconv.Atoi(offsetDecl.Lexeme)
+				if err != nil {
+					return 0, 0, nil, nil, fmt.Errorf("wrong offset value: %s", err)
+				}
 			}
 			s := agnostic.NewOffsetSorter(offset)
 			sorters = append(sorters, s)
@@ -819,9 +876,66 @@ func selectExecutor(t *Tx, selectDecl *parser.Decl, args []NamedValue) (int64, i
 			}
 			sorters = append(sorters, s)
 		case parser.LimitToken:
-			limit, err := strconv.ParseInt(selectDecl.Decl[i].Decl[0].Lexeme, 10, 64)
-			if err != nil {
-				return 0, 0, nil, nil, fmt.Errorf("wrong limit value: %s", err)
+			limitDecl := selectDecl.Decl[i].Decl[0]
+			var limit int64
+			var err error
+			
+			switch limitDecl.Token {
+			case parser.ArgToken:
+				// Handle parameter like $1 or ?
+				var idx int64
+				if limitDecl.Lexeme == "?" {
+					// ODBC-style parameter - we'd need to track position
+					// For now, assume it's the first parameter
+					idx = 1
+				} else {
+					idx, err = strconv.ParseInt(limitDecl.Lexeme, 10, 64)
+					if err != nil {
+						return 0, 0, nil, nil, fmt.Errorf("wrong limit parameter: %s", err)
+					}
+				}
+				if len(args) <= int(idx)-1 {
+					return 0, 0, nil, nil, fmt.Errorf("reference to $%s in LIMIT, but only %d argument provided", limitDecl.Lexeme, len(args))
+				}
+				// Convert the argument value to int64
+				switch v := args[idx-1].Value.(type) {
+				case int:
+					limit = int64(v)
+				case int64:
+					limit = v
+				case int32:
+					limit = int64(v)
+				default:
+					return 0, 0, nil, nil, fmt.Errorf("LIMIT parameter must be an integer, got %T", v)
+				}
+			case parser.NamedArgToken:
+				// Handle named parameter like :name
+				found := false
+				for _, arg := range args {
+					if arg.Name == limitDecl.Lexeme {
+						switch v := arg.Value.(type) {
+						case int:
+							limit = int64(v)
+						case int64:
+							limit = v
+						case int32:
+							limit = int64(v)
+						default:
+							return 0, 0, nil, nil, fmt.Errorf("LIMIT parameter must be an integer, got %T", v)
+						}
+						found = true
+						break
+					}
+				}
+				if !found {
+					return 0, 0, nil, nil, fmt.Errorf("named parameter %s not found in arguments", limitDecl.Lexeme)
+				}
+			default:
+				// Handle direct number
+				limit, err = strconv.ParseInt(limitDecl.Lexeme, 10, 64)
+				if err != nil {
+					return 0, 0, nil, nil, fmt.Errorf("wrong limit value: %s", err)
+				}
 			}
 			s := agnostic.NewLimitSorter(limit)
 			sorters = append(sorters, s)
