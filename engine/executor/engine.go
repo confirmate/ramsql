@@ -604,6 +604,7 @@ func extractUpdateValues(doUpdateDecl *parser.Decl, insertValues map[string]any)
 			} else {
 				updateValues[colName] = v
 			}
+		}
 	}
 
 	return updateValues
