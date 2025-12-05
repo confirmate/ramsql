@@ -304,10 +304,10 @@ func parseTableForeignKey(fkDecl *parser.Decl, constraintName string) (agnostic.
 		return fk, fmt.Errorf("expected KEY token after FOREIGN")
 	}
 
-	// Extract local columns
+	// Extract local columns (lowercase for consistent matching with attribute names)
 	for _, colDecl := range keyDecl.Decl {
 		if colDecl.Token == parser.StringToken {
-			fk = fk.WithLocalColumn(colDecl.Lexeme)
+			fk = fk.WithLocalColumn(strings.ToLower(colDecl.Lexeme))
 		}
 	}
 
@@ -325,18 +325,18 @@ func parseTableForeignKey(fkDecl *parser.Decl, constraintName string) (agnostic.
 	tblDecl := refDecl.Decl[0]
 	if tblDecl.Token == parser.SchemaToken {
 		// schema.table form
-		fk = fk.WithRefSchema(tblDecl.Lexeme)
+		fk = fk.WithRefSchema(strings.ToLower(tblDecl.Lexeme))
 		if len(tblDecl.Decl) > 0 {
-			fk = fk.WithRefRelation(tblDecl.Decl[0].Lexeme)
+			fk = fk.WithRefRelation(strings.ToLower(tblDecl.Decl[0].Lexeme))
 		}
 	} else {
-		fk = fk.WithRefRelation(tblDecl.Lexeme)
+		fk = fk.WithRefRelation(strings.ToLower(tblDecl.Lexeme))
 	}
 
-	// Remaining children are referenced columns
+	// Remaining children are referenced columns (lowercase for consistent matching)
 	for i := 1; i < len(refDecl.Decl); i++ {
 		if refDecl.Decl[i].Token == parser.StringToken {
-			fk = fk.WithRefColumn(refDecl.Decl[i].Lexeme)
+			fk = fk.WithRefColumn(strings.ToLower(refDecl.Decl[i].Lexeme))
 		}
 	}
 

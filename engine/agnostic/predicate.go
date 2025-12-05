@@ -930,7 +930,8 @@ func (p *TupleInPredicate) Eval(inCols []string, in *Tuple) (bool, error) {
 	// Get current values from the tuple for each functor
 	var currentValues []any
 	for _, f := range p.functors {
-		currentValues = append(currentValues, f.Value(inCols, in))
+		v := f.Value(inCols, in)
+		currentValues = append(currentValues, v)
 	}
 
 	// Check if current values match any of the tuple values

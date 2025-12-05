@@ -36,9 +36,10 @@ func (s *RelationScanner) Exec() ([]string, []*list.Element, error) {
 	cols := s.src.Columns()
 	for s.src.HasNext() {
 		t := s.src.Next()
+		tup := t.Value.(*Tuple)
 		canAppend = true
 		for _, p := range s.predicates {
-			ok, err = p.Eval(cols, t.Value.(*Tuple))
+			ok, err = p.Eval(cols, tup)
 			if err != nil {
 				return nil, nil, fmt.Errorf("RelationScanner.Exec: %s(%v) : %w", p, t, err)
 			}
