@@ -2286,7 +2286,7 @@ func (u *Updater) enforceParentRestrictOnUpdate(changed map[string]fieldChange, 
 						// Found a child row that references the old parent values
 						localColsStr := strings.Join(fk.LocalColumns(), ", ")
 						refColsStr := strings.Join(refCols, ", ")
-						return fmt.Errorf("update violates foreign key: %s.%s(%s) is referenced by %s.%s(%s)", u.rel, refColsStr, refColsStr, schName, childName, localColsStr)
+						return fmt.Errorf("update violates foreign key: %s.%s(%s) is referenced by %s.%s(%s)", u.schema, u.rel, refColsStr, schName, childName, localColsStr)
 					}
 				}
 			}
@@ -2401,7 +2401,7 @@ func (u *Updater) enforceChildFKs(newt *Tuple, cols []string) error {
 			// Build a readable error message
 			localColsStr := strings.Join(fk.LocalColumns(), ", ")
 			refColsStr := strings.Join(refCols, ", ")
-			return fmt.Errorf("update violates foreign key: %s(%s) references %s.%s(%s)", u.rel, localColsStr, refSchema, refRel, refColsStr)
+			return fmt.Errorf("update violates foreign key: %s.%s(%s) references %s.%s(%s)", u.schema, u.rel, localColsStr, refSchema, refRel, refColsStr)
 		}
 	}
 

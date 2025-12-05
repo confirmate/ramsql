@@ -683,7 +683,7 @@ func (t *Transaction) Insert(schema, relation string, values map[string]any) (*T
 			// Build a readable error message
 			localColsStr := strings.Join(fk.LocalColumns(), ", ")
 			refColsStr := strings.Join(refCols, ", ")
-			return nil, t.abort(fmt.Errorf("insert violates foreign key on %s(%s) referencing %s.%s(%s)", relation, localColsStr, refSchema, refRel, refColsStr))
+			return nil, t.abort(fmt.Errorf("insert violates foreign key: %s.%s(%s) references %s.%s(%s)", schema, relation, localColsStr, refSchema, refRel, refColsStr))
 		}
 	}
 
