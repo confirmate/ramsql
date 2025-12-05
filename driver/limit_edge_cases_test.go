@@ -119,6 +119,8 @@ func TestLimitConcurrent(t *testing.T) {
 	}
 
 	// Run multiple concurrent queries with LIMIT
+	// Note: We have 10 rows total, and each query reads independently,
+	// so each query with LIMIT N should return exactly N rows
 	var wg sync.WaitGroup
 	errors := make(chan error, 10)
 	

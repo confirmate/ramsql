@@ -15,6 +15,8 @@ type Item struct {
 }
 
 // Test case that replicates the exact issue from the GitHub issue
+// Note: Using postgres driver as specified in the issue report to test
+// ramsql with the same GORM dialect configuration the user was using
 func TestGormLimitReturnsMultipleRows(t *testing.T) {
 	db, err := sql.Open("ramsql", "TestGormLimitReturnsMultipleRows")
 	if err != nil {
