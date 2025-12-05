@@ -7,7 +7,7 @@ require (
 	github.com/go-gorp/gorp v2.2.0+incompatible
 	golang.org/x/exp v0.0.0-20230713183714-613f0c0eb8a1
 	gorm.io/driver/postgres v1.6.0
-	gorm.io/gorm v1.31.1
+	gorm.io/gorm v1.25.10
 )
 
 require (

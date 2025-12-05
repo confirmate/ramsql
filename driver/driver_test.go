@@ -3358,6 +3358,48 @@ func TestOrderByWithLimitParameter(t *testing.T) {
 	}
 }
 
+func TestLimitWithParameter(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestLimitWithParameter")
+	if err != nil {
+		t.Fatalf("sql.Open: Error: %s", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE items (id INT, name TEXT)`)
+	if err != nil {
+		t.Fatalf("cannot create table: %s", err)
+	}
+
+	// Insert test data
+	for i := 1; i <= 5; i++ {
+		_, err = db.Exec(`INSERT INTO items (id, name) VALUES ($1, $2)`, i, fmt.Sprintf("item-%d", i))
+		if err != nil {
+			t.Fatalf("cannot insert row %d: %s", i, err)
+		}
+	}
+
+	// Test LIMIT with parameter
+	rows, err := db.Query(`SELECT id, name FROM items LIMIT $1`, 2)
+	if err != nil {
+		t.Fatalf("cannot select with LIMIT $1: %s", err)
+	}
+	defer rows.Close()
+
+	var count int
+	for rows.Next() {
+		var id int
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			t.Fatalf("scan failed: %s", err)
+		}
+		count++
+	}
+
+	if count != 2 {
+		t.Fatalf("expected 2 rows, got %d", count)
+	}
+}
+
 func TestSchemaQualifiedSelects(t *testing.T) {
 	db, err := sql.Open("ramsql", "TestSchemaQualifiedSelects")
 	if err != nil {
