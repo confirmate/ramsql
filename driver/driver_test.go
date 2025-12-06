@@ -929,7 +929,8 @@ func TestOffset(t *testing.T) {
 	}
 }
 
-func TestOffsetBeyondRows(t *testing.T) {
+func TestOffsetEqualToRowCount(t *testing.T) {
+
 	batch := []string{
 		`CREATE TABLE items (id TEXT)`,
 		`INSERT INTO items (id) VALUES ('1')`,
@@ -939,7 +940,7 @@ func TestOffsetBeyondRows(t *testing.T) {
 		`INSERT INTO items (id) VALUES ('5')`,
 	}
 
-	db, err := sql.Open("ramsql", "TestOffsetBeyondRows")
+	db, err := sql.Open("ramsql", "TestOffsetEqualToRowCount")
 	if err != nil {
 		t.Fatalf("sql.Open : Error : %s\n", err)
 	}
@@ -952,97 +953,160 @@ func TestOffsetBeyondRows(t *testing.T) {
 		}
 	}
 
-	// Test OFFSET equal to number of rows
-	t.Run("OffsetEqualToRowCount", func(t *testing.T) {
-		rows, err := db.Query(`SELECT * FROM items OFFSET 5`)
+	rows, err := db.Query(`SELECT * FROM items OFFSET 5`)
+	if err != nil {
+		t.Fatalf("sql.Query: %s", err)
+	}
+	defer rows.Close()
+
+	var count int
+	for rows.Next() {
+		var id string
+		err = rows.Scan(&id)
 		if err != nil {
-			t.Fatalf("sql.Query: %s", err)
+			t.Fatalf("rows.Scan: %s", err)
 		}
-		defer rows.Close()
+		count++
+	}
 
-		var count int
-		for rows.Next() {
-			var id string
-			err = rows.Scan(&id)
-			if err != nil {
-				t.Fatalf("rows.Scan: %s", err)
-			}
-			count++
-		}
+	if count != 0 {
+		t.Fatalf("Expected 0 rows when offset equals row count, got %d rows", count)
+	}
+}
 
-		if count != 0 {
-			t.Fatalf("Expected 0 rows when offset equals row count, got %d rows", count)
-		}
-	})
+func TestOffsetGreaterThanRowCount(t *testing.T) {
 
-	// Test OFFSET greater than number of rows
-	t.Run("OffsetGreaterThanRowCount", func(t *testing.T) {
-		rows, err := db.Query(`SELECT * FROM items OFFSET 26`)
+	batch := []string{
+		`CREATE TABLE items (id TEXT)`,
+		`INSERT INTO items (id) VALUES ('1')`,
+		`INSERT INTO items (id) VALUES ('2')`,
+		`INSERT INTO items (id) VALUES ('3')`,
+		`INSERT INTO items (id) VALUES ('4')`,
+		`INSERT INTO items (id) VALUES ('5')`,
+	}
+
+	db, err := sql.Open("ramsql", "TestOffsetGreaterThanRowCount")
+	if err != nil {
+		t.Fatalf("sql.Open : Error : %s\n", err)
+	}
+	defer db.Close()
+
+	for _, b := range batch {
+		_, err = db.Exec(b)
 		if err != nil {
-			t.Fatalf("sql.Query: %s", err)
+			t.Fatalf("sql.Exec: %s", err)
 		}
-		defer rows.Close()
+	}
 
-		var count int
-		for rows.Next() {
-			var id string
-			err = rows.Scan(&id)
-			if err != nil {
-				t.Fatalf("rows.Scan: %s", err)
-			}
-			count++
-		}
+	rows, err := db.Query(`SELECT * FROM items OFFSET 26`)
+	if err != nil {
+		t.Fatalf("sql.Query: %s", err)
+	}
+	defer rows.Close()
 
-		if count != 0 {
-			t.Fatalf("Expected 0 rows when offset > row count, got %d rows", count)
-		}
-	})
-
-	// Test OFFSET with LIMIT beyond available rows
-	t.Run("OffsetWithLimitBeyondRows", func(t *testing.T) {
-		rows, err := db.Query(`SELECT * FROM items LIMIT 2 OFFSET 26`)
+	var count int
+	for rows.Next() {
+		var id string
+		err = rows.Scan(&id)
 		if err != nil {
-			t.Fatalf("sql.Query: %s", err)
+			t.Fatalf("rows.Scan: %s", err)
 		}
-		defer rows.Close()
+		count++
+	}
 
-		var count int
-		for rows.Next() {
-			var id string
-			err = rows.Scan(&id)
-			if err != nil {
-				t.Fatalf("rows.Scan: %s", err)
-			}
-			count++
-		}
+	if count != 0 {
+		t.Fatalf("Expected 0 rows when offset > row count, got %d rows", count)
+	}
+}
 
-		if count != 0 {
-			t.Fatalf("Expected 0 rows when offset+limit > row count, got %d rows", count)
-		}
-	})
+func TestOffsetWithLimitBeyondRows(t *testing.T) {
 
-	// Test edge case: OFFSET at last row
-	t.Run("OffsetAtLastRow", func(t *testing.T) {
-		rows, err := db.Query(`SELECT * FROM items OFFSET 4`)
+	batch := []string{
+		`CREATE TABLE items (id TEXT)`,
+		`INSERT INTO items (id) VALUES ('1')`,
+		`INSERT INTO items (id) VALUES ('2')`,
+		`INSERT INTO items (id) VALUES ('3')`,
+		`INSERT INTO items (id) VALUES ('4')`,
+		`INSERT INTO items (id) VALUES ('5')`,
+	}
+
+	db, err := sql.Open("ramsql", "TestOffsetWithLimitBeyondRows")
+	if err != nil {
+		t.Fatalf("sql.Open : Error : %s\n", err)
+	}
+	defer db.Close()
+
+	for _, b := range batch {
+		_, err = db.Exec(b)
 		if err != nil {
-			t.Fatalf("sql.Query: %s", err)
+			t.Fatalf("sql.Exec: %s", err)
 		}
-		defer rows.Close()
+	}
 
-		var count int
-		for rows.Next() {
-			var id string
-			err = rows.Scan(&id)
-			if err != nil {
-				t.Fatalf("rows.Scan: %s", err)
-			}
-			count++
-		}
+	rows, err := db.Query(`SELECT * FROM items LIMIT 2 OFFSET 26`)
+	if err != nil {
+		t.Fatalf("sql.Query: %s", err)
+	}
+	defer rows.Close()
 
-		if count != 1 {
-			t.Fatalf("Expected 1 row when offset at last row, got %d rows", count)
+	var count int
+	for rows.Next() {
+		var id string
+		err = rows.Scan(&id)
+		if err != nil {
+			t.Fatalf("rows.Scan: %s", err)
 		}
-	})
+		count++
+	}
+
+	if count != 0 {
+		t.Fatalf("Expected 0 rows when offset+limit > row count, got %d rows", count)
+	}
+}
+
+func TestOffsetAtLastRow(t *testing.T) {
+
+	batch := []string{
+		`CREATE TABLE items (id TEXT)`,
+		`INSERT INTO items (id) VALUES ('1')`,
+		`INSERT INTO items (id) VALUES ('2')`,
+		`INSERT INTO items (id) VALUES ('3')`,
+		`INSERT INTO items (id) VALUES ('4')`,
+		`INSERT INTO items (id) VALUES ('5')`,
+	}
+
+	db, err := sql.Open("ramsql", "TestOffsetAtLastRow")
+	if err != nil {
+		t.Fatalf("sql.Open : Error : %s\n", err)
+	}
+	defer db.Close()
+
+	for _, b := range batch {
+		_, err = db.Exec(b)
+		if err != nil {
+			t.Fatalf("sql.Exec: %s", err)
+		}
+	}
+
+	rows, err := db.Query(`SELECT * FROM items OFFSET 4`)
+	if err != nil {
+		t.Fatalf("sql.Query: %s", err)
+	}
+	defer rows.Close()
+
+	var count int
+	for rows.Next() {
+		var id string
+		err = rows.Scan(&id)
+		if err != nil {
+			t.Fatalf("rows.Scan: %s", err)
+		}
+		count++
+	}
+
+	if count != 1 {
+		t.Fatalf("Expected 1 row when offset at last row, got %d rows", count)
+	}
 }
 
 func TestUnique(t *testing.T) {
