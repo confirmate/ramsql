@@ -227,10 +227,10 @@ func (s *OffsetSorter) Exec() ([]string, []*list.Element, error) {
 		return nil, nil, err
 	}
 
-	if len(res) > s.o {
-		res = res[s.o:]
+	if s.o >= len(res) {
+		return cols, nil, nil
 	}
-	return cols, res, nil
+	return cols, res[s.o:], nil
 }
 
 func (s *OffsetSorter) EstimateCardinal() int64 {
