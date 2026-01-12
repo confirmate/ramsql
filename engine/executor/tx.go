@@ -281,6 +281,10 @@ func extractAliasFromTableDecl(t *parser.Decl) (table string, alias string, ok b
 
 func (t *Tx) getPredicates(decl []*parser.Decl, schema, fromTableName string, args []NamedValue, aliases map[string]string) (agnostic.Predicate, error) {
 	var odbcIdx int64 = 1
+	return t.getPredicatesWithODBCIdx(decl, schema, fromTableName, args, aliases, &odbcIdx)
+}
+
+func (t *Tx) getPredicatesWithODBCIdx(decl []*parser.Decl, schema, fromTableName string, args []NamedValue, aliases map[string]string, odbcIdx *int64) (agnostic.Predicate, error) {
 
 	for i, cond := range decl {
 
@@ -361,7 +365,7 @@ func (t *Tx) getPredicates(decl []*parser.Decl, schema, fromTableName string, ar
 
 	// Handle IN keyword
 	if cond.Decl[0].Token == parser.InToken {
-		p, err := inExecutor(fromTableName, pLeftValue, cond.Decl[0])
+		p, err := inExecutor(fromTableName, pLeftValue, cond.Decl[0], args)
 		if err != nil {
 			return nil, err
 		}
@@ -370,7 +374,7 @@ func (t *Tx) getPredicates(decl []*parser.Decl, schema, fromTableName string, ar
 
 	// Handle NOT IN keywords
 	if cond.Decl[0].Token == parser.NotToken && cond.Decl[0].Decl[0].Token == parser.InToken {
-		p, err := notInExecutor(fromTableName, pLeftValue, cond.Decl[0])
+		p, err := notInExecutor(fromTableName, pLeftValue, cond.Decl[0], args)
 		if err != nil {
 			return nil, err
 		}
@@ -412,11 +416,11 @@ func (t *Tx) getPredicates(decl []*parser.Decl, schema, fromTableName string, ar
 		}
 	case parser.ArgToken:
 		var idx int64
-		if rightS.Lexeme == "?" {
-			idx = odbcIdx
-			odbcIdx++
+		if leftS.Lexeme == "?" {
+			idx = *odbcIdx
+			*odbcIdx++
 		} else {
-			idx, err = strconv.ParseInt(rightS.Lexeme, 10, 64)
+			idx, err = strconv.ParseInt(leftS.Lexeme, 10, 64)
 			if err != nil {
 				return nil, err
 			}
@@ -446,8 +450,8 @@ func (t *Tx) getPredicates(decl []*parser.Decl, schema, fromTableName string, ar
 	case parser.ArgToken:
 		var idx int64
 		if rightS.Lexeme == "?" {
-			idx = odbcIdx
-			odbcIdx++
+			idx = *odbcIdx
+			*odbcIdx++
 		} else {
 			idx, err = strconv.ParseInt(rightS.Lexeme, 10, 64)
 			if err != nil {
@@ -590,8 +594,8 @@ func (t *Tx) getDistinctSorter(rel string, decl *parser.Decl, nextAttr string) (
 	return agnostic.NewDistinctSorter(rel, dattrs), nil
 }
 
-func notInExecutor(rname string, aname string, inDecl *parser.Decl) (agnostic.Predicate, error) {
-	in, err := inExecutor(rname, aname, inDecl.Decl[0])
+func notInExecutor(rname string, aname string, inDecl *parser.Decl, args []NamedValue) (agnostic.Predicate, error) {
+	in, err := inExecutor(rname, aname, inDecl.Decl[0], args)
 	if err != nil {
 		return nil, err
 	}
@@ -599,7 +603,7 @@ func notInExecutor(rname string, aname string, inDecl *parser.Decl) (agnostic.Pr
 	return agnostic.NewNotPredicate(in), nil
 }
 
-func inExecutor(rname string, aname string, inDecl *parser.Decl) (agnostic.Predicate, error) {
+func inExecutor(rname string, aname string, inDecl *parser.Decl, args []NamedValue) (agnostic.Predicate, error) {
 
 	if len(inDecl.Decl) == 0 {
 		return nil, ParsingError
@@ -614,13 +618,72 @@ func inExecutor(rname string, aname string, inDecl *parser.Decl) (agnostic.Predi
 	default:
 		var values []any
 		for _, d := range inDecl.Decl {
-			values = append(values, d.Lexeme)
+			// Handle bound parameters (PostgreSQL-style: $1, $2, etc.)
+			if d.Token == parser.ArgToken {
+				idx, err := strconv.ParseInt(d.Lexeme, 10, 64)
+				if err != nil {
+					return nil, fmt.Errorf("cannot parse arg index %s: %w", d.Lexeme, err)
+				}
+				if int(idx) > len(args) || idx < 1 {
+					return nil, fmt.Errorf("arg index %d out of range (have %d args)", idx, len(args))
+				}
+				argValue := args[idx-1].Value
+				
+				// Check if the argument is an array/slice and expand it
+				if expandValues, ok := expandArrayValue(argValue); ok {
+					values = append(values, expandValues...)
+				} else {
+					values = append(values, argValue)
+				}
+			} else {
+				values = append(values, d.Lexeme)
+			}
 		}
 		n = agnostic.NewListNode(values...)
 	}
 
 	p := agnostic.NewInPredicate(v, n)
 	return p, nil
+}
+
+// expandArrayValue checks if a value is an array or slice and expands it.
+// Returns the expanded values and true if expansion occurred, or nil and false otherwise.
+func expandArrayValue(value any) ([]any, bool) {
+	if value == nil {
+		return nil, false
+	}
+
+	// Use reflection to detect and expand slices/arrays
+	switch v := value.(type) {
+	case []interface{}:
+		return v, true
+	case []string:
+		result := make([]any, len(v))
+		for i, s := range v {
+			result[i] = s
+		}
+		return result, true
+	case []int:
+		result := make([]any, len(v))
+		for i, n := range v {
+			result[i] = n
+		}
+		return result, true
+	case []int64:
+		result := make([]any, len(v))
+		for i, n := range v {
+			result[i] = n
+		}
+		return result, true
+	case []float64:
+		result := make([]any, len(v))
+		for i, f := range v {
+			result[i] = f
+		}
+		return result, true
+	default:
+		return nil, false
+	}
 }
 
 // tupleInExecutor builds a predicate for tuple IN expressions like (col1, col2) IN (('a','b'), ('c','d'))
