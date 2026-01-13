@@ -2454,7 +2454,9 @@ func (u *Updater) Exec() (cols []string, out []*list.Element, err error) {
 		u.changes.PushBack(c)
 	}
 
-	if len(u.values) > 0 {
+	// Only check for non-existent attributes if we actually processed rows.
+	// If no rows matched the WHERE clause, u.values won't be consumed, but that's OK.
+	if len(in) > 0 && len(u.values) > 0 {
 		return nil, nil, fmt.Errorf("attribute %s not existing in relation %s, %s", u.values, u.rel, u.attributes)
 	}
 	return cols, out, nil

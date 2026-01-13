@@ -3038,6 +3038,51 @@ func TestUpdateToNull(t *testing.T) {
 
 }
 
+func TestUpdateNonExistingRow(t *testing.T) {
+
+	db, err := sql.Open("ramsql", "TestUpdateNonExistingRow")
+	if err != nil {
+		t.Fatalf("sql.Open : Error : %s\n", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec("CREATE TABLE test_table (id TEXT PRIMARY KEY, name TEXT)")
+	if err != nil {
+		t.Fatalf("sql.Exec: Error: %s\n", err)
+	}
+
+	_, err = db.Exec("INSERT INTO test_table (id, name) VALUES ('id-1', 'Name 1')")
+	if err != nil {
+		t.Fatalf("Cannot insert into table test_table: %s", err)
+	}
+
+	// Test 1: Update existing row
+	result, err := db.Exec("UPDATE test_table SET name = $1 WHERE id = $2", "Updated Name", "id-1")
+	if err != nil {
+		t.Fatalf("Cannot update existing row: %s", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		t.Fatalf("Cannot get rows affected: %s", err)
+	}
+	if rowsAffected != 1 {
+		t.Fatalf("Expected 1 row affected, got %d", rowsAffected)
+	}
+
+	// Test 2: Update non-existing row (should not error, but have 0 rows affected)
+	result, err = db.Exec("UPDATE test_table SET name = $1 WHERE id = $2", "Another Name", "non-existent-id")
+	if err != nil {
+		t.Fatalf("UPDATE non-existing row should not error, got: %s", err)
+	}
+	rowsAffected, err = result.RowsAffected()
+	if err != nil {
+		t.Fatalf("Cannot get rows affected: %s", err)
+	}
+	if rowsAffected != 0 {
+		t.Fatalf("Expected 0 rows affected, got %d", rowsAffected)
+	}
+}
+
 func TestDeadlock(t *testing.T) {
 	db, err := sql.Open("ramsql", "TestDeadlock")
 	if err != nil {
