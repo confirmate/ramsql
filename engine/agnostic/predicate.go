@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/maphash"
+	"regexp"
 	"reflect"
 	"sort"
 	"strings"
@@ -794,6 +795,8 @@ func NewComparisonPredicate(left ValueFunctor, t PredicateType, right ValueFunct
 		return NewGePredicate(left, right), nil
 	case Neq:
 		return NewNeqPredicate(left, right), nil
+	case Like:
+		return NewLikePredicate(left, right), nil
 	default:
 		return nil, fmt.Errorf("unknown predicate type %v", t)
 	}
@@ -1219,6 +1222,52 @@ func (p *EqPredicate) Relation() string {
 }
 
 func (p *EqPredicate) Attribute() []string {
+	return append(p.left.Attribute(), p.right.Attribute()...)
+}
+
+type LikePredicate struct {
+	left  ValueFunctor
+	right ValueFunctor
+}
+
+func NewLikePredicate(left, right ValueFunctor) *LikePredicate {
+	return &LikePredicate{left: left, right: right}
+}
+
+func (p *LikePredicate) Type() PredicateType {
+	return Like
+}
+
+func (p LikePredicate) String() string {
+	return fmt.Sprintf("%s LIKE %s", p.left, p.right)
+}
+
+func (p *LikePredicate) Eval(cols []string, t *Tuple) (bool, error) {
+	vl := p.left.Value(cols, t)
+	vr := p.right.Value(cols, t)
+	if vl == nil || vr == nil {
+		return false, nil
+	}
+	return likeMatch(fmt.Sprint(vl), fmt.Sprint(vr))
+}
+
+func (p *LikePredicate) Left() (Predicate, bool) {
+	return nil, false
+}
+
+func (p *LikePredicate) Right() (Predicate, bool) {
+	return nil, false
+}
+
+func (p *LikePredicate) Relation() string {
+	if p.left.Relation() != "" {
+		return p.left.Relation()
+	}
+
+	return p.right.Relation()
+}
+
+func (p *LikePredicate) Attribute() []string {
 	return append(p.left.Attribute(), p.right.Attribute()...)
 }
 
@@ -2059,6 +2108,13 @@ func equal(vl, vr any) (bool, error) {
 	}
 
 	return false, fmt.Errorf("%v (%v) and %v (%v) not comparable", vl, reflect.TypeOf(vl), vr, reflect.TypeOf(vr))
+}
+
+func likeMatch(value, pattern string) (bool, error) {
+	regex := "^" + regexp.QuoteMeta(pattern) + "$"
+	regex = strings.ReplaceAll(regex, "%", ".*")
+	regex = strings.ReplaceAll(regex, "_", ".")
+	return regexp.MatchString(regex, value)
 }
 
 func greater(vl, vr any) (bool, error) {

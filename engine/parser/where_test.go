@@ -14,3 +14,15 @@ func TestWhereArithmeticExpressions(t *testing.T) {
 		parse(q, 1, t)
 	}
 }
+
+func TestWhereLikeExpressions(t *testing.T) {
+	queries := []string{
+		`SELECT * FROM resources WHERE name LIKE 'some%'`,
+		`SELECT * FROM resources WHERE name LIKE 'some_thing%'`,
+		`SELECT * FROM resources WHERE name LIKE 'some%' OR name LIKE 'other%' LIMIT 50`,
+	}
+
+	for _, q := range queries {
+		parse(q, 1, t)
+	}
+}
