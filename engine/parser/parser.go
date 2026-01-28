@@ -720,8 +720,8 @@ func (p *parser) parseExpression(leftDecl *Decl) (*Decl, error) {
 		leftDecl.Add(rightDecl)
 	}
 
-	// Check for comparison operators (=, <>, <, >, <=, >=)
-	if p.is(EqualityToken, DistinctnessToken, LeftDipleToken, RightDipleToken, LessOrEqualToken, GreaterOrEqualToken) {
+	// Check for comparison operators (=, <>, <, >, <=, >=, LIKE)
+	if p.is(EqualityToken, DistinctnessToken, LeftDipleToken, RightDipleToken, LessOrEqualToken, GreaterOrEqualToken, LikeToken) {
 		operatorDecl, err := p.consumeToken(p.cur().Token)
 		if err != nil {
 			return nil, err

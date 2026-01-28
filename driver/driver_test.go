@@ -176,6 +176,71 @@ func TestSelectWhereAttribute(t *testing.T) {
 	}
 }
 
+func TestSelectLikePredicate(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestSelectLikePredicate")
+	if err != nil {
+		t.Fatalf("sql.Open : Error : %s\n", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec("CREATE TABLE resource (id INT, name TEXT)")
+	if err != nil {
+		t.Fatalf("sql.Exec: Error: %s\n", err)
+	}
+
+	batch := []string{
+		"INSERT INTO resource ('id', 'name') VALUES (1, 'something')",
+		"INSERT INTO resource ('id', 'name') VALUES (2, 'something_else')",
+		"INSERT INTO resource ('id', 'name') VALUES (3, 'someXthing')",
+		"INSERT INTO resource ('id', 'name') VALUES (4, 'other')",
+	}
+
+	for _, q := range batch {
+		if _, err = db.Exec(q); err != nil {
+			t.Fatalf("sql.Exec: Error: %s\n", err)
+		}
+	}
+
+	rows, err := db.Query("SELECT * FROM resource WHERE name LIKE 'some%'")
+	if err != nil {
+		t.Fatalf("sql.Query error: %s", err)
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var id int
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			t.Fatalf("rows.Scan error: %s", err)
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err error: %s", err)
+	}
+	if count != 3 {
+		t.Fatalf("expected 3 rows, got %d", count)
+	}
+
+	rows, err = db.Query("SELECT * FROM resource WHERE name LIKE 'some_thing%'")
+	if err != nil {
+		t.Fatalf("sql.Query error: %s", err)
+	}
+	defer rows.Close()
+
+	count = 0
+	for rows.Next() {
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err error: %s", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 rows, got %d", count)
+	}
+}
+
 func TestSelectCamelCase(t *testing.T) {
 	db, err := sql.Open("ramsql", "TestSelectCamelCase")
 	if err != nil {

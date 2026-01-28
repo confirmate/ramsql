@@ -82,6 +82,7 @@ const (
 	DescToken
 	LimitToken
 	IsToken
+	LikeToken
 	ForToken
 	DefaultToken
 	LocalTimestampToken
@@ -212,6 +213,7 @@ func (l *lexer) lex(instruction []byte) ([]Token, error) {
 	matchers = append(matchers, l.genericStringMatcher("desc", DescToken))
 	matchers = append(matchers, l.genericStringMatcher("limit", LimitToken))
 	matchers = append(matchers, l.genericStringMatcher("is", IsToken))
+	matchers = append(matchers, l.genericStringMatcher("like", LikeToken))
 	matchers = append(matchers, l.genericStringMatcher("for", ForToken))
 	matchers = append(matchers, l.genericStringMatcher("default", DefaultToken))
 	matchers = append(matchers, l.genericStringMatcher("localtimestamp", LocalTimestampToken))

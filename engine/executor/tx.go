@@ -347,7 +347,7 @@ func (t *Tx) getPredicatesWithODBCIdx(decl []*parser.Decl, schema, fromTableName
 	}
 
 	switch cond.Decl[0].Token {
-	case parser.IsToken, parser.InToken, parser.EqualityToken, parser.DistinctnessToken, parser.LeftDipleToken, parser.RightDipleToken, parser.LessOrEqualToken, parser.GreaterOrEqualToken:
+	case parser.IsToken, parser.InToken, parser.EqualityToken, parser.DistinctnessToken, parser.LeftDipleToken, parser.RightDipleToken, parser.LessOrEqualToken, parser.GreaterOrEqualToken, parser.LikeToken:
 		break
 	default:
 		fromTableName = cond.Decl[0].Lexeme
@@ -484,6 +484,8 @@ func (t *Tx) getPredicatesWithODBCIdx(decl []*parser.Decl, schema, fromTableName
 		ptype = agnostic.Le
 	case parser.RightDipleToken:
 		ptype = agnostic.Ge
+	case parser.LikeToken:
+		ptype = agnostic.Like
 	default:
 		return nil, fmt.Errorf("unknown comparison token %s", op.Lexeme)
 	}

@@ -178,7 +178,7 @@ func (p *parser) parseCondition() (*Decl, error) {
 
 		// Now check for comparison operators
 		switch p.cur().Token {
-		case EqualityToken, DistinctnessToken, LeftDipleToken, RightDipleToken, LessOrEqualToken, GreaterOrEqualToken:
+		case EqualityToken, DistinctnessToken, LeftDipleToken, RightDipleToken, LessOrEqualToken, GreaterOrEqualToken, LikeToken:
 			decl, err := p.consumeToken(p.cur().Token)
 			if err != nil {
 				return nil, err
@@ -293,7 +293,7 @@ func (p *parser) parseCondition() (*Decl, error) {
 
 	// Now check for comparison and special WHERE operators
 	switch p.cur().Token {
-	case EqualityToken, DistinctnessToken, LeftDipleToken, RightDipleToken, LessOrEqualToken, GreaterOrEqualToken:
+	case EqualityToken, DistinctnessToken, LeftDipleToken, RightDipleToken, LessOrEqualToken, GreaterOrEqualToken, LikeToken:
 		decl, err := p.consumeToken(p.cur().Token)
 		if err != nil {
 			return nil, err
