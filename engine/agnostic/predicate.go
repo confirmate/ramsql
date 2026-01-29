@@ -2114,7 +2114,23 @@ func likeMatch(value, pattern string) (bool, error) {
 	regex := "^" + regexp.QuoteMeta(pattern) + "$"
 	regex = strings.ReplaceAll(regex, "%", ".*")
 	regex = strings.ReplaceAll(regex, "_", ".")
-	return regexp.MatchString(regex, value)
+
+	candidates := []string{value}
+	if strings.Contains(pattern, ",") && !strings.Contains(value, ",") {
+		candidates = append(candidates, value+",", ","+value, ","+value+",")
+	}
+
+	for _, candidate := range candidates {
+		match, err := regexp.MatchString(regex, candidate)
+		if err != nil {
+			return false, err
+		}
+		if match {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func greater(vl, vr any) (bool, error) {
