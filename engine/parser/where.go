@@ -89,6 +89,35 @@ func (p *parser) parseCondition() (*Decl, error) {
 			return nil, err
 		}
 
+		if p.hasLogicalOperatorUntilClosingBracket() {
+			groupDecl := &Decl{Token: BracketOpeningToken, Lexeme: "("}
+			for {
+				if p.is(BracketClosingToken) {
+					_, err := p.consumeToken(BracketClosingToken)
+					if err != nil {
+						return nil, err
+					}
+					break
+				}
+
+				condDecl, err := p.parseCondition()
+				if err != nil {
+					return nil, err
+				}
+				groupDecl.Add(condDecl)
+
+				if p.is(AndToken, OrToken) {
+					linkDecl, err := p.consumeToken(p.cur().Token)
+					if err != nil {
+						return nil, err
+					}
+					groupDecl.Add(linkDecl)
+				}
+			}
+
+			return groupDecl, nil
+		}
+
 		// Parse first attribute
 		firstAttr, err := p.parseAttribute()
 		if err != nil {
@@ -355,4 +384,24 @@ func (p *parser) parseCondition() (*Decl, error) {
 	attributeDecl.Add(valueDecl)
 
 	return attributeDecl, nil
+}
+
+func (p *parser) hasLogicalOperatorUntilClosingBracket() bool {
+	depth := 0
+	for i := p.index; i < len(p.tokens); i++ {
+		switch p.tokens[i].Token {
+		case BracketOpeningToken:
+			depth++
+		case BracketClosingToken:
+			if depth == 0 {
+				return false
+			}
+			depth--
+		case AndToken, OrToken:
+			if depth == 0 {
+				return true
+			}
+		}
+	}
+	return false
 }

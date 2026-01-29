@@ -20,6 +20,7 @@ func TestWhereLikeExpressions(t *testing.T) {
 		`SELECT * FROM resources WHERE name LIKE 'some%'`,
 		`SELECT * FROM resources WHERE name LIKE 'some_thing%'`,
 		`SELECT * FROM resources WHERE name LIKE 'some%' OR name LIKE 'other%' LIMIT 50`,
+		`SELECT * FROM resources WHERE (name LIKE 'some%' OR name LIKE 'other%') LIMIT 50`,
 	}
 
 	for _, q := range queries {

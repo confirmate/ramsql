@@ -321,6 +321,7 @@ func (t *Tx) getPredicatesWithODBCIdx(decl []*parser.Decl, schema, fromTableName
 		var inDecl *parser.Decl
 		var isNot bool
 		var attrs []*parser.Decl
+		var hasLogical bool
 
 		for _, child := range cond.Decl {
 			if child.Token == parser.InToken {
@@ -332,6 +333,8 @@ func (t *Tx) getPredicatesWithODBCIdx(decl []*parser.Decl, schema, fromTableName
 					inDecl = child.Decl[0]
 				}
 				break
+			} else if child.Token == parser.AndToken || child.Token == parser.OrToken {
+				hasLogical = true
 			} else {
 				attrs = append(attrs, child)
 			}
@@ -339,6 +342,14 @@ func (t *Tx) getPredicatesWithODBCIdx(decl []*parser.Decl, schema, fromTableName
 
 		if inDecl != nil && len(attrs) > 0 {
 			p, err := tupleInExecutor(fromTableName, attrs, inDecl, isNot, aliases, args)
+			if err != nil {
+				return nil, err
+			}
+			return p, nil
+		}
+
+		if hasLogical {
+			p, err := t.getPredicates(cond.Decl, schema, fromTableName, args, aliases)
 			if err != nil {
 				return nil, err
 			}
