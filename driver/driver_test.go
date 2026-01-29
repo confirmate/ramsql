@@ -239,6 +239,23 @@ func TestSelectLikePredicate(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("expected 1 rows, got %d", count)
 	}
+
+	rows, err = db.Query("SELECT * FROM resource WHERE (name LIKE 'some%' OR name LIKE 'other%') LIMIT 50")
+	if err != nil {
+		t.Fatalf("sql.Query error: %s", err)
+	}
+	defer rows.Close()
+
+	count = 0
+	for rows.Next() {
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err error: %s", err)
+	}
+	if count != 4 {
+		t.Fatalf("expected 4 rows, got %d", count)
+	}
 }
 
 func TestSelectCamelCase(t *testing.T) {
