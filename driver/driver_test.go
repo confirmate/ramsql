@@ -258,6 +258,57 @@ func TestSelectLikePredicate(t *testing.T) {
 	}
 }
 
+func TestRamSQL_LikeOrClause_Repro(t *testing.T) {
+	db, err := sql.Open("ramsql", "ramsql_like_or_repro")
+	if err != nil {
+		t.Fatalf("failed to open ramsql DB: %v", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE resources (
+		id TEXT PRIMARY KEY,
+		resource_type TEXT
+	)`)
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+
+	_, err = db.Exec(`INSERT INTO resources (id, resource_type) VALUES
+		('vm-1', 'virtual_machine'),
+		('app-1', 'application'),
+		('vm-2', 'virtual_machine')
+	`)
+	if err != nil {
+		t.Fatalf("failed to insert rows: %v", err)
+	}
+
+	rows, err := db.Query(`SELECT id, resource_type FROM resources WHERE
+		(resource_type LIKE 'virtual_machine,%'
+		 OR resource_type LIKE '%,virtual_machine,%'
+		 OR resource_type LIKE '%,virtual_machine')
+		LIMIT 50`)
+	if err != nil {
+		t.Fatalf("expected query to succeed, got error: %v", err)
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var id, resourceType string
+		if scanErr := rows.Scan(&id, &resourceType); scanErr != nil {
+			t.Fatalf("failed to scan row: %v", scanErr)
+		}
+		count++
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		t.Fatalf("row iteration error: %v", rowsErr)
+	}
+
+	if count != 2 {
+		t.Fatalf("expected 2 rows, got %d", count)
+	}
+}
+
 func TestSelectCamelCase(t *testing.T) {
 	db, err := sql.Open("ramsql", "TestSelectCamelCase")
 	if err != nil {
