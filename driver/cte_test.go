@@ -150,8 +150,8 @@ func TestMultipleCTEs(t *testing.T) {
 
 	count := 0
 	for rows.Next() {
-		var id, customer_id, amount int
-		err = rows.Scan(&id, &customer_id, &amount)
+		var id, customerID, amount int
+		err = rows.Scan(&id, &customerID, &amount)
 		if err != nil {
 			t.Fatalf("Scan: %s", err)
 		}

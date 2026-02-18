@@ -61,13 +61,13 @@ func (p *parser) parseWithSelect(tokens []Token) (*Instruction, error) {
 		depth := 1
 		endIndex := startIndex
 
-		for i := p.index + 1; i < p.tokenLen; i++ {
-			if tokens[i].Token == BracketOpeningToken {
+		for idx := p.index + 1; idx < p.tokenLen; idx++ {
+			if tokens[idx].Token == BracketOpeningToken {
 				depth++
-			} else if tokens[i].Token == BracketClosingToken {
+			} else if tokens[idx].Token == BracketClosingToken {
 				depth--
 				if depth == 0 {
-					endIndex = i
+					endIndex = idx
 					break
 				}
 			}

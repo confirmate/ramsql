@@ -79,8 +79,7 @@ func (t *Tx) QueryContext(ctx context.Context, query string, args []NamedValue) 
 	// Handle WITH clause specially
 	if inst.Decls[0].Token == parser.WithToken {
 		// Execute WITH to create temporary tables
-		_, _, _, _, err := t.opsExecutors[parser.WithToken](t, inst.Decls[0], args)
-		if err != nil {
+		if _, _, _, _, err := t.opsExecutors[parser.WithToken](t, inst.Decls[0], args); err != nil {
 			return nil, nil, err
 		}
 		

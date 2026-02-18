@@ -1175,6 +1175,7 @@ func withExecutor(t *Tx, withDecl *parser.Decl, args []NamedValue) (int64, int64
 		}
 		
 		// Create a temporary table to store CTE results
+		// Empty string for schema name means use the default schema (public)
 		// Infer column types from the first tuple
 		var attributes []agnostic.Attribute
 		if len(tuples) > 0 && len(tuples[0].Values()) > 0 {
@@ -1198,6 +1199,7 @@ func withExecutor(t *Tx, withDecl *parser.Decl, args []NamedValue) (int64, int64
 		}
 		
 		// Insert CTE results into temporary table
+		// Column names are converted to lowercase for consistent matching with attribute names
 		for _, tuple := range tuples {
 			values := make(map[string]any)
 			for i, col := range cols {
@@ -1216,6 +1218,8 @@ func withExecutor(t *Tx, withDecl *parser.Decl, args []NamedValue) (int64, int64
 }
 
 // inferType infers the SQL type from a Go value
+// Note: Returns 'text' for nil values as a fallback. If type precision is needed,
+// consider checking multiple values in the column or using explicit type hints.
 func inferType(val any) string {
 	if val == nil {
 		return "text"
