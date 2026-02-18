@@ -18,7 +18,16 @@ type Transaction struct {
 	// list of Change
 	changes *list.List
 
+	// CTEs stores Common Table Expressions during WITH query execution
+	CTEs map[string]*CTEData
+
 	err error
+}
+
+// CTEData holds the results of a CTE execution
+type CTEData struct {
+	Columns []string
+	Rows    []*Tuple
 }
 
 func NewTransaction(e *Engine) (*Transaction, error) {
@@ -26,6 +35,7 @@ func NewTransaction(e *Engine) (*Transaction, error) {
 		e:       e,
 		locks:   make(map[string]*Relation),
 		changes: list.New(),
+		CTEs:    make(map[string]*CTEData),
 	}
 
 	return &t, nil
@@ -851,14 +861,17 @@ func (t *Transaction) Plan(schema string, selectors []Selector, p Predicate, joi
 			// Skip selectors with no relation (constants in SELECT without FROM)
 			continue
 		}
-		r, err := s.Relation(rel)
+		r, isCTE, err := t.getRelationOrCTE(s, rel)
 		if err != nil {
 			return nil, t.abort(err)
 		}
 		if a := sel.Alias(); a != "" {
 			aliases[rel] = a
 		}
-		t.lock(r)
+		// Only lock regular relations, not CTEs
+		if !isCTE {
+			t.lock(r)
+		}
 		relations[rel] = r
 	}
 
@@ -980,13 +993,16 @@ func (t *Transaction) recLock(schema string, relations map[string]*Relation, p P
 		return err
 	}
 	if rel := p.Relation(); rel != "" {
-		r, err := s.Relation(rel)
+		r, isCTE, err := t.getRelationOrCTE(s, rel)
 		if err != nil {
 			return err
 		}
 
 		relations[p.Relation()] = r
-		t.lock(r)
+		// Only lock regular relations, not CTEs
+		if !isCTE {
+			t.lock(r)
+		}
 	}
 
 	if lp, ok := p.Left(); ok {
@@ -1083,4 +1099,44 @@ func getAlias(name string, alias map[string]string) string {
 		return a
 	}
 	return ""
+}
+
+// getRelationOrCTE attempts to get a relation, checking CTEs first
+func (t *Transaction) getRelationOrCTE(schema *Schema, relationName string) (*Relation, bool, error) {
+	// Check if this is a CTE
+	if cteData, ok := t.CTEs[relationName]; ok {
+		// Convert CTE data into a temporary in-memory relation
+		rel, err := t.createCTERelation(relationName, cteData)
+		if err != nil {
+			return nil, true, err
+		}
+		return rel, true, nil
+	}
+
+	// Not a CTE, get the regular relation
+	r, err := schema.Relation(relationName)
+	return r, false, err
+}
+
+// createCTERelation creates a temporary relation from CTE data
+func (t *Transaction) createCTERelation(name string, cteData *CTEData) (*Relation, error) {
+	// Build attributes from CTE columns
+	// For simplicity, assume all columns are strings (we could infer types from data if needed)
+	attributes := make([]Attribute, len(cteData.Columns))
+	for i, colName := range cteData.Columns {
+		attributes[i] = NewAttribute(colName, "TEXT")
+	}
+
+	// Create a new relation (use empty schema, no primary key for CTEs)
+	rel, err := NewRelation("", name, attributes, []string{})
+	if err != nil {
+		return nil, err
+	}
+
+	// Populate the relation with CTE data
+	for _, tuple := range cteData.Rows {
+		rel.rows.PushBack(tuple)
+	}
+
+	return rel, nil
 }

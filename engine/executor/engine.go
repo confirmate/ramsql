@@ -1140,3 +1140,70 @@ func orderbyExecutor(decl *parser.Decl, tables []string) (agnostic.Sorter, error
 	sorter := agnostic.NewOrderBySorter(relation, attrs)
 	return sorter, nil
 }
+
+// withExecutor executes a WITH (CTE) query
+func withExecutor(t *Tx, withDecl *parser.Decl, args []NamedValue) (int64, int64, []string, []*agnostic.Tuple, error) {
+	// The structure is:
+	// withDecl has children:
+	// - One or more CTE definitions (each with name and SELECT)
+	// - The main SELECT statement (last child)
+
+	if len(withDecl.Decl) < 2 {
+		return 0, 0, nil, nil, fmt.Errorf("WITH clause must have at least one CTE and a main query")
+	}
+
+	// Find the main SELECT (last child)
+	mainSelectIndex := len(withDecl.Decl) - 1
+	mainSelectDecl := withDecl.Decl[mainSelectIndex]
+	if mainSelectDecl.Token != parser.SelectToken {
+		return 0, 0, nil, nil, fmt.Errorf("WITH clause must end with a SELECT statement")
+	}
+
+	// Process each CTE definition (all except the last which is the main SELECT)
+	for i := 0; i < mainSelectIndex; i++ {
+		cteDecl := withDecl.Decl[i]
+		if cteDecl.Token != parser.StringToken {
+			return 0, 0, nil, nil, fmt.Errorf("expected CTE name")
+		}
+
+		cteName := cteDecl.Lexeme
+
+		// The CTE should have one child which is the SELECT
+		if len(cteDecl.Decl) != 1 {
+			return 0, 0, nil, nil, fmt.Errorf("CTE must have exactly one SELECT statement")
+		}
+
+		cteSelectDecl := cteDecl.Decl[0]
+		if cteSelectDecl.Token != parser.SelectToken {
+			return 0, 0, nil, nil, fmt.Errorf("CTE must contain a SELECT statement")
+		}
+
+		// Execute the CTE SELECT and store results
+		_, _, cols, rows, err := selectExecutor(t, cteSelectDecl, args)
+		if err != nil {
+			return 0, 0, nil, nil, fmt.Errorf("error executing CTE '%s': %v", cteName, err)
+		}
+
+		// Store CTE results in the transaction
+		t.tx.CTEs[cteName] = &agnostic.CTEData{
+			Columns: cols,
+			Rows:    rows,
+		}
+	}
+
+	// Execute the main SELECT query
+	_, _, cols, rows, err := selectExecutor(t, mainSelectDecl, args)
+
+	// Clean up CTEs
+	for i := 0; i < mainSelectIndex; i++ {
+		cteName := withDecl.Decl[i].Lexeme
+		delete(t.tx.CTEs, cteName)
+	}
+
+	if err != nil {
+		return 0, 0, nil, nil, fmt.Errorf("error executing main SELECT in WITH: %v", err)
+	}
+
+	return 0, 0, cols, rows, nil
+}
+
