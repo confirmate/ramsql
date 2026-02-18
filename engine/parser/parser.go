@@ -102,8 +102,14 @@ func (p *parser) parse(tokens []Token) ([]Instruction, error) {
 		// Now,
 		// Create a logical tree of all tokens
 		// We start with first order query
-		// CREATE, SELECT, INSERT, UPDATE, DELETE, TRUNCATE, DROP, EXPLAIN
+		// CREATE, SELECT, INSERT, UPDATE, DELETE, TRUNCATE, DROP, EXPLAIN, WITH
 		switch tokens[p.index].Token {
+		case WithToken:
+			i, err := p.parseWith(tokens)
+			if err != nil {
+				return nil, err
+			}
+			p.i = append(p.i, *i)
 		case CreateToken:
 			i, err := p.parseCreate(tokens)
 			if err != nil {

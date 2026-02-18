@@ -316,3 +316,111 @@ func (p *parser) parseForUpdate(decl *Decl) error {
 	decl.Add(d)
 	return nil
 }
+
+func (p *parser) parseWith(tokens []Token) (*Instruction, error) {
+	i := &Instruction{}
+
+	// Create WITH decl
+	withDecl := NewDecl(tokens[p.index])
+	i.Decls = append(i.Decls, withDecl)
+
+	if err := p.next(); err != nil {
+		return nil, fmt.Errorf("WITH token must be followed by CTE name")
+	}
+
+	// Parse CTE definitions (can be multiple, comma-separated)
+	for {
+		// CTE name
+		cteNameDecl, err := p.consumeToken(StringToken)
+		if err != nil {
+			return nil, fmt.Errorf("expected CTE name after WITH: %v", err)
+		}
+		withDecl.Add(cteNameDecl)
+
+		// AS keyword
+		if _, err := p.consumeToken(AsToken); err != nil {
+			return nil, fmt.Errorf("expected AS after CTE name: %v", err)
+		}
+
+		// Opening parenthesis
+		if _, err := p.consumeToken(BracketOpeningToken); err != nil {
+			return nil, fmt.Errorf("expected '(' after AS: %v", err)
+		}
+
+		// Now should be a SELECT statement
+		if !p.is(SelectToken) {
+			return nil, fmt.Errorf("expected SELECT statement in CTE, got %v", p.cur().Lexeme)
+		}
+
+		// Parse the SELECT statement for this CTE
+		// We need to find the matching closing parenthesis
+		selectStartIndex := p.index
+		parenCount := 1
+		selectEndIndex := selectStartIndex + 1
+
+		// Find the matching closing parenthesis
+		for selectEndIndex < p.tokenLen && parenCount > 0 {
+			if p.tokens[selectEndIndex].Token == BracketOpeningToken {
+				parenCount++
+			} else if p.tokens[selectEndIndex].Token == BracketClosingToken {
+				parenCount--
+			}
+			if parenCount > 0 {
+				selectEndIndex++
+			}
+		}
+
+		if parenCount != 0 {
+			return nil, fmt.Errorf("unmatched parenthesis in CTE")
+		}
+
+		// Create a sub-parser for the CTE SELECT
+		cteTokens := p.tokens[selectStartIndex:selectEndIndex]
+		subParser := &parser{
+			tokens:   cteTokens,
+			tokenLen: len(cteTokens),
+			index:    0,
+		}
+
+		selectInst, err := subParser.parseSelect(cteTokens)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing CTE SELECT: %v", err)
+		}
+
+		// Add the SELECT declaration to the CTE name
+		if len(selectInst.Decls) > 0 {
+			cteNameDecl.Add(selectInst.Decls[0])
+		}
+
+		// Move parser position past the CTE
+		p.index = selectEndIndex + 1 // +1 to skip the closing paren
+
+		// Check for comma (multiple CTEs) or SELECT (main query)
+		if p.index < p.tokenLen && p.is(CommaToken) {
+			if _, err := p.consumeToken(CommaToken); err != nil {
+				return nil, err
+			}
+			// Continue to parse next CTE
+			continue
+		}
+
+		// Must be followed by SELECT
+		if p.index >= p.tokenLen || !p.is(SelectToken) {
+			return nil, fmt.Errorf("expected SELECT after CTE definition")
+		}
+		break
+	}
+
+	// Parse the main SELECT statement
+	selectInst, err := p.parseSelect(tokens)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing main SELECT after WITH: %v", err)
+	}
+
+	// Add the main SELECT to the WITH instruction
+	if len(selectInst.Decls) > 0 {
+		withDecl.Add(selectInst.Decls[0])
+	}
+
+	return i, nil
+}
