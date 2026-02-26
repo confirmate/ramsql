@@ -18,7 +18,7 @@ import "fmt"
 //	        |-> (...)
 //	    |-> "ON" (OnToken) (optional, for ON CONFLICT)
 //	        |-> "CONFLICT" (ConflictToken)
-//	            |-> column name (conflict target, optional)
+//	            |-> column names (conflict target, optional)
 //	            |-> (...)
 //	        |-> "DO" (DoToken)
 //	            |-> "UPDATE" (UpdateToken) or "NOTHING" (NothingToken)

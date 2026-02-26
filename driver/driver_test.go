@@ -2295,8 +2295,6 @@ func TestInsertOnConflictDoUpdateMultipleColumns(t *testing.T) {
 	}
 }
 
-
-
 func TestJoinOrderBy(t *testing.T) {
 	db, err := sql.Open("ramsql", "TestJoinOrderBy")
 	if err != nil {
