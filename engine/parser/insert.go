@@ -18,7 +18,7 @@ import "fmt"
 //	        |-> (...)
 //	    |-> "ON" (OnToken) (optional, for ON CONFLICT)
 //	        |-> "CONFLICT" (ConflictToken)
-//	            |-> column name (conflict target)
+//	            |-> column name (conflict target, optional)
 //	            |-> (...)
 //	        |-> "DO" (DoToken)
 //	            |-> "UPDATE" (UpdateToken) or "NOTHING" (NothingToken)
@@ -132,30 +132,32 @@ func (p *parser) parseInsert() (*Instruction, error) {
 		}
 		onDecl.Add(conflictDecl)
 
-		// Parse conflict target (column names in parentheses)
-		_, err = p.consumeToken(BracketOpeningToken)
-		if err != nil {
-			return nil, err
-		}
-
-		for {
-			attrDecl, err := p.parseAttribute()
+		// Parse conflict target (column names in parentheses) - optional in PostgreSQL
+		if p.is(BracketOpeningToken) {
+			_, err = p.consumeToken(BracketOpeningToken)
 			if err != nil {
 				return nil, err
 			}
-			conflictDecl.Add(attrDecl)
 
-			if p.is(BracketClosingToken) {
-				_, err = p.consumeToken(BracketClosingToken)
+			for {
+				attrDecl, err := p.parseAttribute()
 				if err != nil {
 					return nil, err
 				}
-				break
-			}
+				conflictDecl.Add(attrDecl)
 
-			_, err = p.consumeToken(CommaToken)
-			if err != nil {
-				return nil, err
+				if p.is(BracketClosingToken) {
+					_, err = p.consumeToken(BracketClosingToken)
+					if err != nil {
+						return nil, err
+					}
+					break
+				}
+
+				_, err = p.consumeToken(CommaToken)
+				if err != nil {
+					return nil, err
+				}
 			}
 		}
 

@@ -2184,8 +2184,120 @@ func TestInsertOnConflictDoNothing(t *testing.T) {
 	}
 }
 
-func TestJoinOrderBy(t *testing.T) {
+func TestInsertOnConflictDoNothingWithoutTarget(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestInsertOnConflictDoNothingWithoutTarget")
+	if err != nil {
+		t.Fatalf("sql.Open : Error : %s\n", err)
+	}
+	defer db.Close()
 
+	_, err = db.Exec(`CREATE TABLE metrics (id TEXT PRIMARY KEY, name TEXT)`)
+	if err != nil {
+		t.Fatalf("sql.Exec: Error: %s\n", err)
+	}
+
+	// Insert initial row
+	_, err = db.Exec(`INSERT INTO metrics (id, name) VALUES ('key1', 'original')`)
+	if err != nil {
+		t.Fatalf("Cannot insert into table: %s", err)
+	}
+
+	// ON CONFLICT DO NOTHING without conflict target is valid PostgreSQL syntax
+	_, err = db.Exec(`INSERT INTO metrics (id, name) VALUES ('key1', 'updated') ON CONFLICT DO NOTHING`)
+	if err != nil {
+		t.Fatalf("ON CONFLICT DO NOTHING without target should not error: %s", err)
+	}
+
+	// Verify original value is unchanged
+	var name string
+	err = db.QueryRow(`SELECT name FROM metrics WHERE id = 'key1'`).Scan(&name)
+	if err != nil {
+		t.Fatalf("Cannot query: %s", err)
+	}
+	if name != "original" {
+		t.Fatalf("Expected name 'original', got '%s'", name)
+	}
+}
+
+func TestInsertOnConflictDoNothingGormStyle(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestInsertOnConflictDoNothingGormStyle")
+	if err != nil {
+		t.Fatalf("sql.Open : Error : %s\n", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE "metrics" ("id" TEXT PRIMARY KEY, "name" TEXT, "description" TEXT, "version" TEXT, "category" TEXT)`)
+	if err != nil {
+		t.Fatalf("sql.Exec: Error: %s\n", err)
+	}
+
+	// GORM-style insert with ON CONFLICT DO NOTHING (no conflict target)
+	_, err = db.Exec(`INSERT INTO "metrics" ("id","name","description","version","category") VALUES ('00000000-0000-0000-0000-000000000001','Mock Metric 1','Mock Metric Description 1','v1','test-category') ON CONFLICT DO NOTHING`)
+	if err != nil {
+		t.Fatalf("First insert with ON CONFLICT DO NOTHING: %s", err)
+	}
+
+	// Second insert with conflict - should be skipped silently
+	_, err = db.Exec(`INSERT INTO "metrics" ("id","name","description","version","category") VALUES ('00000000-0000-0000-0000-000000000001','Mock Metric 1 Updated','Updated','v2','test-category') ON CONFLICT DO NOTHING`)
+	if err != nil {
+		t.Fatalf("Second insert (conflict case) with ON CONFLICT DO NOTHING: %s", err)
+	}
+
+	// Verify original value is unchanged
+	var name string
+	err = db.QueryRow(`SELECT name FROM metrics WHERE id = '00000000-0000-0000-0000-000000000001'`).Scan(&name)
+	if err != nil {
+		t.Fatalf("Cannot query: %s", err)
+	}
+	if name != "Mock Metric 1" {
+		t.Fatalf("Expected 'Mock Metric 1', got '%s'", name)
+	}
+}
+
+func TestInsertOnConflictDoUpdateMultipleColumns(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestInsertOnConflictDoUpdateMultipleColumns")
+	if err != nil {
+		t.Fatalf("sql.Open : Error : %s\n", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE "controls" ("id" TEXT, "category_name" TEXT, "category_catalog_id" TEXT, "name" TEXT, "parent_control_id" TEXT, "assurance_level" TEXT, PRIMARY KEY ("id", "category_name", "category_catalog_id"))`)
+	if err != nil {
+		t.Fatalf("sql.Exec: Error: %s\n", err)
+	}
+
+	// Insert a parent control
+	_, err = db.Exec(`INSERT INTO "controls" ("id","category_name","category_catalog_id","name","parent_control_id","assurance_level") VALUES ('control-1','category-1','catalog-1','Mock Control 1',NULL,NULL)`)
+	if err != nil {
+		t.Fatalf("Cannot insert parent control: %s", err)
+	}
+
+	// Insert a sub-control with ON CONFLICT DO UPDATE (GORM-style upsert)
+	_, err = db.Exec(`INSERT INTO "controls" ("id","category_name","category_catalog_id","name","parent_control_id","assurance_level") VALUES ('control-1-1','category-1','catalog-1','Mock Sub-Control 1','control-1',NULL) ON CONFLICT ("id","category_name","category_catalog_id") DO UPDATE SET "parent_control_id"="excluded"."parent_control_id","assurance_level"="excluded"."assurance_level"`)
+	if err != nil {
+		t.Fatalf("Cannot upsert sub-control: %s", err)
+	}
+
+	// Run again (conflict case - should update)
+	_, err = db.Exec(`INSERT INTO "controls" ("id","category_name","category_catalog_id","name","parent_control_id","assurance_level") VALUES ('control-1-1','category-1','catalog-1','Mock Sub-Control 1 Updated','control-1','high') ON CONFLICT ("id","category_name","category_catalog_id") DO UPDATE SET "parent_control_id"="excluded"."parent_control_id","assurance_level"="excluded"."assurance_level"`)
+	if err != nil {
+		t.Fatalf("Cannot upsert sub-control (conflict update): %s", err)
+	}
+
+	// Verify the sub-control was updated
+	var assuranceLevel string
+	err = db.QueryRow(`SELECT assurance_level FROM controls WHERE id = 'control-1-1' AND category_name = 'category-1'`).Scan(&assuranceLevel)
+	if err != nil {
+		t.Fatalf("Cannot query sub-control: %s", err)
+	}
+	if assuranceLevel != "high" {
+		t.Fatalf("Expected assurance_level 'high', got '%s'", assuranceLevel)
+	}
+}
+
+
+
+func TestJoinOrderBy(t *testing.T) {
 	db, err := sql.Open("ramsql", "TestJoinOrderBy")
 	if err != nil {
 		t.Fatalf("sql.Open: %s", err)
