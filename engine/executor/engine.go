@@ -1140,3 +1140,104 @@ func orderbyExecutor(decl *parser.Decl, tables []string) (agnostic.Sorter, error
 	sorter := agnostic.NewOrderBySorter(relation, attrs)
 	return sorter, nil
 }
+
+// withExecutor handles WITH (CTE) clauses
+// Structure: WITH decl contains CTE definitions, followed by main SELECT
+func withExecutor(t *Tx, withDecl *parser.Decl, args []NamedValue) (int64, int64, []string, []*agnostic.Tuple, error) {
+	// Find the main SELECT statement (should be the last decl in parent instruction)
+	// The withDecl is the WITH token, and we need to find the SELECT in the instruction
+	
+	// Execute each CTE and store results as temporary tables
+	for _, cteDecl := range withDecl.Decl {
+		if cteDecl.Token != parser.StringToken {
+			continue
+		}
+		
+		cteName := cteDecl.Lexeme
+		
+		// Find the AS clause containing the SELECT
+		var cteSelectDecl *parser.Decl
+		for _, child := range cteDecl.Decl {
+			if child.Token == parser.AsToken && len(child.Decl) > 0 {
+				cteSelectDecl = child.Decl[0]
+				break
+			}
+		}
+		
+		if cteSelectDecl == nil || cteSelectDecl.Token != parser.SelectToken {
+			return 0, 0, nil, nil, fmt.Errorf("CTE %s must contain a SELECT statement", cteName)
+		}
+		
+		// Execute the CTE SELECT
+		_, _, cols, tuples, err := selectExecutor(t, cteSelectDecl, args)
+		if err != nil {
+			return 0, 0, nil, nil, fmt.Errorf("error executing CTE %s: %v", cteName, err)
+		}
+		
+		// Create a temporary table to store CTE results
+		// Empty string for schema name means use the default schema (public)
+		// Infer column types from the first tuple
+		var attributes []agnostic.Attribute
+		if len(tuples) > 0 && len(tuples[0].Values()) > 0 {
+			for i, colName := range cols {
+				// Infer type from first value
+				val := tuples[0].Values()[i]
+				typeName := inferType(val)
+				attributes = append(attributes, agnostic.NewAttribute(colName, typeName))
+			}
+		} else {
+			// No data, create attributes with text type
+			for _, colName := range cols {
+				attributes = append(attributes, agnostic.NewAttribute(colName, "text"))
+			}
+		}
+		
+		// Create temporary table
+		err = t.tx.CreateRelation("", cteName, attributes, nil)
+		if err != nil {
+			return 0, 0, nil, nil, fmt.Errorf("error creating temporary table for CTE %s: %v", cteName, err)
+		}
+		
+		// Insert CTE results into temporary table
+		// Column names are converted to lowercase for consistent matching with attribute names
+		for _, tuple := range tuples {
+			values := make(map[string]any)
+			for i, col := range cols {
+				values[strings.ToLower(col)] = tuple.Values()[i]
+			}
+			_, err = t.tx.Insert("", cteName, values)
+			if err != nil {
+				return 0, 0, nil, nil, fmt.Errorf("error inserting into CTE table %s: %v", cteName, err)
+			}
+		}
+	}
+	
+	// The main SELECT should be executed by the caller
+	// Return empty result to indicate success
+	return 0, 0, nil, nil, nil
+}
+
+// inferType infers the SQL type from a Go value
+// Note: Returns 'text' for nil values as a fallback. If type precision is needed,
+// consider checking multiple values in the column or using explicit type hints.
+func inferType(val any) string {
+	if val == nil {
+		return "text"
+	}
+	
+	switch val.(type) {
+	case int, int8, int16, int32, int64:
+		return "bigint"
+	case uint, uint8, uint16, uint32, uint64:
+		return "bigint"
+	case float32, float64:
+		return "float"
+	case bool:
+		return "bool"
+	case string:
+		return "text"
+	default:
+		return "text"
+	}
+}
+

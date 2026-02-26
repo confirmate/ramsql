@@ -110,6 +110,13 @@ func (p *parser) parse(tokens []Token) ([]Instruction, error) {
 				return nil, err
 			}
 			p.i = append(p.i, *i)
+		case WithToken:
+			// WITH clause followed by SELECT
+			i, err := p.parseWithSelect(tokens)
+			if err != nil {
+				return nil, err
+			}
+			p.i = append(p.i, *i)
 		case SelectToken:
 			i, err := p.parseSelect(tokens)
 			if err != nil {
