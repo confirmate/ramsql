@@ -558,14 +558,20 @@ func handleOnConflict(t *Tx, schemaName, relationName string, values map[string]
 		conflictCols = append(conflictCols, strings.ToLower(colDecl.Lexeme))
 	}
 
+	// Convert values to match column types for consistent predicate comparison
+	convertedValues, err := t.tx.ConvertValuesForRelation(schemaName, relationName, values)
+	if err != nil {
+		return nil, err
+	}
+
 	// Build predicate for the conflicting row
-	predicate := buildConflictPredicate(relationName, conflictCols, values)
+	predicate := buildConflictPredicate(relationName, conflictCols, convertedValues)
 	if predicate == nil {
 		return nil, fmt.Errorf("conflict target columns must have values in the INSERT statement")
 	}
 
-	// Get the SET clause values
-	updateValues := extractUpdateValues(doUpdateDecl, values)
+	// Get the SET clause values (use converted values for excluded.* references)
+	updateValues := extractUpdateValues(doUpdateDecl, convertedValues)
 
 	// Perform the update - use star selector to include all columns for RETURNING and DO UPDATE SET
 	selectors := []agnostic.Selector{agnostic.NewStarSelector(relationName)}

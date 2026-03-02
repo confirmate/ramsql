@@ -524,12 +524,17 @@ func (t *Transaction) CheckPrimaryKeyConflict(schema, relation string, values ma
 		return false, err
 	}
 
-	// Build a partial tuple with just the primary key values
+	// Build a partial tuple with type conversion (same as Insert) to ensure
+	// the hash matches what is stored in the primary key index.
 	tuple := &Tuple{}
 	for _, attr := range r.attributes {
 		val, specified := values[attr.name]
 		if specified {
-			tuple.Append(val)
+			if val != nil && reflect.TypeOf(val).ConvertibleTo(attr.typeInstance) {
+				tuple.Append(reflect.ValueOf(val).Convert(attr.typeInstance).Interface())
+			} else {
+				tuple.Append(val)
+			}
 		} else if attr.defaultValue != nil {
 			tuple.Append(attr.defaultValue())
 		} else {
@@ -545,6 +550,36 @@ func (t *Transaction) CheckPrimaryKeyConflict(schema, relation string, values ma
 	}
 	// ok = true means no conflict, ok = false means conflict
 	return !ok, nil
+}
+
+// ConvertValuesForRelation converts values to match the types of the relation's attributes.
+// This ensures type consistency when building predicates or performing lookups.
+func (t *Transaction) ConvertValuesForRelation(schema, relation string, values map[string]any) (map[string]any, error) {
+	if err := t.aborted(); err != nil {
+		return nil, err
+	}
+
+	s, err := t.e.schema(schema)
+	if err != nil {
+		return nil, err
+	}
+	r, err := s.Relation(relation)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]any, len(values))
+	for k, v := range values {
+		result[k] = v
+	}
+	for _, attr := range r.attributes {
+		if val, ok := result[attr.name]; ok && val != nil {
+			if reflect.TypeOf(val).ConvertibleTo(attr.typeInstance) {
+				result[attr.name] = reflect.ValueOf(val).Convert(attr.typeInstance).Interface()
+			}
+		}
+	}
+	return result, nil
 }
 
 // Build tuple for given relation
