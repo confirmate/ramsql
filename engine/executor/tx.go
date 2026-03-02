@@ -55,6 +55,7 @@ func NewTx(ctx context.Context, e *Engine, opts sql.TxOptions) (*Tx, error) {
 		parser.TruncateToken: truncateExecutor,
 		parser.DropToken:     dropExecutor,
 		parser.GrantToken:    grantExecutor,
+		parser.WithToken:     withExecutor,
 	}
 
 	return t, nil
@@ -73,6 +74,30 @@ func (t *Tx) QueryContext(ctx context.Context, query string, args []NamedValue) 
 	inst := instructions[0]
 	if len(inst.Decls) == 0 {
 		return nil, nil, fmt.Errorf("expected 1 query")
+	}
+
+	// Handle WITH clause specially
+	if inst.Decls[0].Token == parser.WithToken {
+		// Execute WITH to create temporary tables
+		if _, _, _, _, err := t.opsExecutors[parser.WithToken](t, inst.Decls[0], args); err != nil {
+			return nil, nil, err
+		}
+		
+		// Now execute the main SELECT (should be second decl)
+		if len(inst.Decls) < 2 {
+			return nil, nil, fmt.Errorf("WITH clause must be followed by SELECT")
+		}
+		
+		if inst.Decls[1].Token != parser.SelectToken {
+			return nil, nil, fmt.Errorf("WITH clause must be followed by SELECT, got %d", inst.Decls[1].Token)
+		}
+		
+		_, _, cols, res, err := t.opsExecutors[parser.SelectToken](t, inst.Decls[1], args)
+		if err != nil {
+			return nil, nil, err
+		}
+		
+		return cols, res, nil
 	}
 
 	if t.opsExecutors[inst.Decls[0].Token] == nil {
