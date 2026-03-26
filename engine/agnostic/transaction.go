@@ -429,9 +429,19 @@ func (t *Transaction) Delete(schema, relation string, selectors []Selector, p Pr
 						return nil, nil, t.abort(err)
 					}
 					if len(rows2) > 0 {
-						localColsStr := strings.Join(fk.LocalColumns(), ", ")
-						refColsStr := strings.Join(refCols, ", ")
-						return nil, nil, t.abort(fmt.Errorf("delete violates foreign key: %s.%s(%s) is referenced by %s.%s(%s)", s.name, relation, refColsStr, schName, childName, localColsStr))
+						action := fk.OnDeleteAction()
+						switch action {
+						case "CASCADE":
+							// Cascade: delete the referencing child rows first
+							if _, _, err := t.Delete(schName, childName, nil, pred); err != nil {
+								return nil, nil, t.abort(err)
+							}
+						default:
+							// RESTRICT, NO ACTION, or unspecified: error
+							localColsStr := strings.Join(fk.LocalColumns(), ", ")
+							refColsStr := strings.Join(refCols, ", ")
+							return nil, nil, t.abort(fmt.Errorf("delete violates foreign key: %s.%s(%s) is referenced by %s.%s(%s)", s.name, relation, refColsStr, schName, childName, localColsStr))
+						}
 					}
 				}
 			}

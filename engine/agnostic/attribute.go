@@ -87,6 +87,16 @@ func (a Attribute) WithForeignKey(schema, relation, attribute string) Attribute 
 	return a
 }
 
+// WithForeignKeyOnDelete sets the ON DELETE action on the attribute's foreign key.
+// It is a no-op if the attribute has no foreign key.
+func (a Attribute) WithForeignKeyOnDelete(action string) Attribute {
+	if a.fk != nil {
+		updated := a.fk.WithOnDeleteAction(action)
+		a.fk = &updated
+	}
+	return a
+}
+
 // WithForeignKeyStruct attaches a full foreign key definition to this attribute.
 // Useful for distributing table-level (composite) foreign keys across attributes.
 func (a Attribute) WithForeignKeyStruct(fk ForeignKey) Attribute {

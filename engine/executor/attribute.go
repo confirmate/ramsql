@@ -69,11 +69,14 @@ func parseAttribute(decl *parser.Decl) (attr agnostic.Attribute, isPk bool, err 
 
 		// Check for column-level REFERENCES
 		if typeDecl[i].Token == parser.ReferencesToken {
-			refSchema, refTable, refCol, err := parseReferencesDecl(typeDecl[i])
+			refSchema, refTable, refCol, onDelete, err := parseReferencesDecl(typeDecl[i])
 			if err != nil {
 				return agnostic.Attribute{}, false, err
 			}
 			attr = attr.WithForeignKey(refSchema, refTable, refCol)
+			if onDelete != "" {
+				attr = attr.WithForeignKeyOnDelete(onDelete)
+			}
 		}
 
 		// Check for column-level CONSTRAINT ... REFERENCES
@@ -81,11 +84,14 @@ func parseAttribute(decl *parser.Decl) (attr agnostic.Attribute, isPk bool, err 
 			// Skip constraint name (typeDecl[i].Decl[0])
 			// Look for REFERENCES child
 			if len(typeDecl[i].Decl) > 1 && typeDecl[i].Decl[1].Token == parser.ReferencesToken {
-				refSchema, refTable, refCol, err := parseReferencesDecl(typeDecl[i].Decl[1])
+				refSchema, refTable, refCol, onDelete, err := parseReferencesDecl(typeDecl[i].Decl[1])
 				if err != nil {
 					return agnostic.Attribute{}, false, err
 				}
 				attr = attr.WithForeignKey(refSchema, refTable, refCol)
+				if onDelete != "" {
+					attr = attr.WithForeignKeyOnDelete(onDelete)
+				}
 			}
 		}
 
@@ -98,13 +104,14 @@ func parseAttribute(decl *parser.Decl) (attr agnostic.Attribute, isPk bool, err 
 	return attr, isPk, nil
 }
 
-// parseReferencesDecl extracts schema, table, and column from a REFERENCES decl node.
-// Returns (refSchema, refTable, refCol, error).
+// parseReferencesDecl extracts schema, table, column, and ON DELETE action from a REFERENCES decl node.
+// Returns (refSchema, refTable, refCol, onDelete, error).
 // If schema is not specified, refSchema is empty (meaning same schema as referencing table).
 // If column list is omitted, refCol is empty (meaning reference the PK).
-func parseReferencesDecl(refDecl *parser.Decl) (refSchema, refTable, refCol string, err error) {
+// onDelete is the ON DELETE action (e.g. "CASCADE", "RESTRICT"), or "" if not specified.
+func parseReferencesDecl(refDecl *parser.Decl) (refSchema, refTable, refCol, onDelete string, err error) {
 	if len(refDecl.Decl) == 0 {
-		return "", "", "", fmt.Errorf("REFERENCES clause has no children")
+		return "", "", "", "", fmt.Errorf("REFERENCES clause has no children")
 	}
 
 	// First child is the table name (may be schema-qualified)
@@ -120,11 +127,25 @@ func parseReferencesDecl(refDecl *parser.Decl) (refSchema, refTable, refCol stri
 		refTable = tblDecl.Lexeme
 	}
 
-	// Remaining children are the column list (if present)
-	// For column-level FK, typically just one column
-	if len(refDecl.Decl) > 1 {
-		refCol = refDecl.Decl[1].Lexeme
+	// Remaining children are the column list (if present) or ON clauses
+	for i := 1; i < len(refDecl.Decl); i++ {
+		switch refDecl.Decl[i].Token {
+		case parser.StringToken:
+			if refCol == "" {
+				refCol = refDecl.Decl[i].Lexeme
+			}
+		case parser.OnToken:
+			// ON DELETE ... or ON UPDATE ...
+			onDecl := refDecl.Decl[i]
+			if len(onDecl.Decl) == 0 {
+				continue
+			}
+			actionTypeDecl := onDecl.Decl[0]
+			if actionTypeDecl.Token == parser.DeleteToken && len(actionTypeDecl.Decl) > 0 {
+				onDelete = strings.ToUpper(actionTypeDecl.Decl[0].Lexeme)
+			}
+		}
 	}
 
-	return refSchema, refTable, refCol, nil
+	return refSchema, refTable, refCol, onDelete, nil
 }
