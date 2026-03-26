@@ -5,7 +5,193 @@ import (
 	"testing"
 )
 
-// TestCompositeForeignKey_DifferentColumnNames tests that composite foreign keys
+// TestOnDeleteCascade tests that ON DELETE CASCADE deletes child rows when a parent is deleted.
+func TestOnDeleteCascade(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestOnDeleteCascade")
+	if err != nil {
+		t.Fatalf("sql.Open : %s", err)
+	}
+	defer db.Close()
+
+	setup := []string{
+		`CREATE TABLE catalogs (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE categories (
+			id TEXT PRIMARY KEY,
+			catalog_id TEXT,
+			FOREIGN KEY (catalog_id) REFERENCES catalogs(id) ON DELETE CASCADE
+		)`,
+	}
+	for _, q := range setup {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("setup failed: %s (query: %s)", err, q)
+		}
+	}
+
+	// Insert a catalog and two categories that reference it
+	if _, err := db.Exec(`INSERT INTO catalogs (id) VALUES ('catalog-1')`); err != nil {
+		t.Fatalf("insert catalog: %s", err)
+	}
+	if _, err := db.Exec(`INSERT INTO categories (id, catalog_id) VALUES ('cat-1', 'catalog-1')`); err != nil {
+		t.Fatalf("insert category 1: %s", err)
+	}
+	if _, err := db.Exec(`INSERT INTO categories (id, catalog_id) VALUES ('cat-2', 'catalog-1')`); err != nil {
+		t.Fatalf("insert category 2: %s", err)
+	}
+
+	// Deleting the catalog should cascade to its categories
+	if _, err := db.Exec(`DELETE FROM catalogs WHERE id = 'catalog-1'`); err != nil {
+		t.Fatalf("delete catalog (expected cascade): %s", err)
+	}
+
+	// Verify catalog is gone
+	var catalogCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM catalogs`).Scan(&catalogCount); err != nil {
+		t.Fatalf("count catalogs: %s", err)
+	}
+	if catalogCount != 0 {
+		t.Fatalf("expected 0 catalogs, got %d", catalogCount)
+	}
+
+	// Verify categories were also deleted by cascade
+	var categoryCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM categories`).Scan(&categoryCount); err != nil {
+		t.Fatalf("count categories: %s", err)
+	}
+	if categoryCount != 0 {
+		t.Fatalf("expected 0 categories after cascade, got %d", categoryCount)
+	}
+}
+
+// TestOnDeleteCascadeDeep tests ON DELETE CASCADE across multiple levels of nesting.
+func TestOnDeleteCascadeDeep(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestOnDeleteCascadeDeep")
+	if err != nil {
+		t.Fatalf("sql.Open : %s", err)
+	}
+	defer db.Close()
+
+	setup := []string{
+		`CREATE TABLE catalogs (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE categories (
+			id TEXT PRIMARY KEY,
+			catalog_id TEXT,
+			FOREIGN KEY (catalog_id) REFERENCES catalogs(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE controls (
+			id TEXT PRIMARY KEY,
+			category_id TEXT,
+			FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
+		)`,
+	}
+	for _, q := range setup {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("setup failed: %s (query: %s)", err, q)
+		}
+	}
+
+	if _, err := db.Exec(`INSERT INTO catalogs (id) VALUES ('c1')`); err != nil {
+		t.Fatalf("insert catalog: %s", err)
+	}
+	if _, err := db.Exec(`INSERT INTO categories (id, catalog_id) VALUES ('cat1', 'c1')`); err != nil {
+		t.Fatalf("insert category: %s", err)
+	}
+	if _, err := db.Exec(`INSERT INTO controls (id, category_id) VALUES ('ctrl1', 'cat1')`); err != nil {
+		t.Fatalf("insert control: %s", err)
+	}
+
+	// Deleting the catalog should cascade through categories to controls
+	if _, err := db.Exec(`DELETE FROM catalogs WHERE id = 'c1'`); err != nil {
+		t.Fatalf("delete catalog (expected deep cascade): %s", err)
+	}
+
+	var count int
+	for _, tbl := range []string{"catalogs", "categories", "controls"} {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM ` + tbl).Scan(&count); err != nil {
+			t.Fatalf("count %s: %s", tbl, err)
+		}
+		if count != 0 {
+			t.Fatalf("expected 0 rows in %s after cascade, got %d", tbl, count)
+		}
+	}
+}
+
+// TestOnDeleteCascadeColumnLevel tests ON DELETE CASCADE on a column-level REFERENCES clause.
+func TestOnDeleteCascadeColumnLevel(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestOnDeleteCascadeColumnLevel")
+	if err != nil {
+		t.Fatalf("sql.Open : %s", err)
+	}
+	defer db.Close()
+
+	setup := []string{
+		`CREATE TABLE parent (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE child (
+			id TEXT PRIMARY KEY,
+			parent_id TEXT REFERENCES parent(id) ON DELETE CASCADE
+		)`,
+	}
+	for _, q := range setup {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("setup failed: %s (query: %s)", err, q)
+		}
+	}
+
+	if _, err := db.Exec(`INSERT INTO parent (id) VALUES ('p1')`); err != nil {
+		t.Fatalf("insert parent: %s", err)
+	}
+	if _, err := db.Exec(`INSERT INTO child (id, parent_id) VALUES ('c1', 'p1')`); err != nil {
+		t.Fatalf("insert child: %s", err)
+	}
+
+	if _, err := db.Exec(`DELETE FROM parent WHERE id = 'p1'`); err != nil {
+		t.Fatalf("delete parent with CASCADE: %s", err)
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM child`).Scan(&count); err != nil {
+		t.Fatalf("count child: %s", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected 0 child rows after cascade delete, got %d", count)
+	}
+}
+
+// TestOnDeleteRestrictStillWorks verifies that RESTRICT (or no action) still prevents deletes.
+func TestOnDeleteRestrictStillWorks(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestOnDeleteRestrictStillWorks")
+	if err != nil {
+		t.Fatalf("sql.Open : %s", err)
+	}
+	defer db.Close()
+
+	setup := []string{
+		`CREATE TABLE parent (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE child (
+			id TEXT PRIMARY KEY,
+			parent_id TEXT,
+			FOREIGN KEY (parent_id) REFERENCES parent(id)
+		)`,
+	}
+	for _, q := range setup {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("setup failed: %s (query: %s)", err, q)
+		}
+	}
+
+	if _, err := db.Exec(`INSERT INTO parent (id) VALUES ('p1')`); err != nil {
+		t.Fatalf("insert parent: %s", err)
+	}
+	if _, err := db.Exec(`INSERT INTO child (id, parent_id) VALUES ('c1', 'p1')`); err != nil {
+		t.Fatalf("insert child: %s", err)
+	}
+
+	// Delete should fail because child references parent and no CASCADE
+	if _, err := db.Exec(`DELETE FROM parent WHERE id = 'p1'`); err == nil {
+		t.Fatal("expected FK restrict error on parent delete, got nil")
+	}
+}
+
+
 // work correctly when the column names in the child table differ from those in
 // the parent table.
 func TestCompositeForeignKey_DifferentColumnNames(t *testing.T) {

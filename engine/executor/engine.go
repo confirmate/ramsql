@@ -391,8 +391,19 @@ func parseTableForeignKey(fkDecl *parser.Decl, constraintName string) (agnostic.
 
 	// Remaining children are referenced columns (lowercase for consistent matching)
 	for i := 1; i < len(refDecl.Decl); i++ {
-		if refDecl.Decl[i].Token == parser.StringToken {
+		switch refDecl.Decl[i].Token {
+		case parser.StringToken:
 			fk = fk.WithRefColumn(strings.ToLower(refDecl.Decl[i].Lexeme))
+		case parser.OnToken:
+			// ON DELETE ... or ON UPDATE ...
+			onDecl := refDecl.Decl[i]
+			if len(onDecl.Decl) == 0 {
+				continue
+			}
+			actionTypeDecl := onDecl.Decl[0]
+			if actionTypeDecl.Token == parser.DeleteToken && len(actionTypeDecl.Decl) > 0 {
+				fk = fk.WithOnDeleteAction(actionTypeDecl.Decl[0].Lexeme)
+			}
 		}
 	}
 

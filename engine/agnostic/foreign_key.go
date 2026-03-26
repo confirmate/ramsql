@@ -19,6 +19,9 @@ type ForeignKey struct {
 	// refColumns are the referenced column names (empty means reference PK)
 	// For column-level FK, this will typically have one element
 	refColumns []string
+	// onDelete is the referential action for DELETE (e.g., "CASCADE", "RESTRICT", "SET NULL", "SET DEFAULT", "NO ACTION")
+	// Empty string means the default (RESTRICT) behavior.
+	onDelete string
 }
 
 // Name returns the optional constraint name
@@ -76,6 +79,18 @@ func (fk ForeignKey) WithRefRelation(relation string) ForeignKey {
 // WithRefColumn adds a referenced column
 func (fk ForeignKey) WithRefColumn(col string) ForeignKey {
 	fk.refColumns = append(fk.refColumns, col)
+	return fk
+}
+
+// OnDeleteAction returns the ON DELETE referential action.
+// Possible values are "CASCADE", "RESTRICT", "SET NULL", "SET DEFAULT", "NO ACTION", or "" (defaults to RESTRICT).
+func (fk ForeignKey) OnDeleteAction() string {
+	return fk.onDelete
+}
+
+// WithOnDeleteAction sets the ON DELETE referential action.
+func (fk ForeignKey) WithOnDeleteAction(action string) ForeignKey {
+	fk.onDelete = strings.ToUpper(action)
 	return fk
 }
 
