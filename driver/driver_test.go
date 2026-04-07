@@ -2935,6 +2935,33 @@ func TestOrderByMultipleStrings(t *testing.T) {
 	}
 }
 
+func TestOrderByInvalidColumn(t *testing.T) {
+
+	db, err := sql.Open("ramsql", "TestOrderByInvalidColumn")
+	if err != nil {
+		t.Fatalf("sql.Open : Error : %s\n", err)
+	}
+	defer db.Close()
+
+	batch := []string{
+		`CREATE TABLE user (name TEXT, age INT);`,
+		`INSERT INTO user (name, age) VALUES ('Alice', 30);`,
+		`INSERT INTO user (name, age) VALUES ('Bob', 25);`,
+	}
+
+	for _, b := range batch {
+		_, err = db.Exec(b)
+		if err != nil {
+			t.Fatalf("sql.Exec: Error: %s", err)
+		}
+	}
+
+	_, err = db.Query(`SELECT name, age FROM user ORDER BY nonexistent_column ASC`)
+	if err == nil {
+		t.Fatal("expected an error when ordering by a nonexistent column, got nil")
+	}
+}
+
 func TestSelectNoOp(t *testing.T) {
 	log.SetLevel(log.WarningLevel)
 

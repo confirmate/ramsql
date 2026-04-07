@@ -340,10 +340,16 @@ func (s *OrderBySorter) Exec() ([]string, []*list.Element, error) {
 
 	var idxs []int
 	for _, a := range s.attrs {
+		found := false
 		for i, c := range cols {
 			if c == a.attr || c == s.rel+"."+a.attr {
 				idxs = append(idxs, i)
+				found = true
+				break
 			}
+		}
+		if !found {
+			return nil, nil, fmt.Errorf("column %s does not exist", a.attr)
 		}
 	}
 
