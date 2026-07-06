@@ -3971,3 +3971,51 @@ func TestTypeAliasInsert(t *testing.T) {
 		t.Fatalf("expected 100, got %d", readValue)
 	}
 }
+
+func TestHashIndexMultipleRowsSameFK(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestHashIndexMultipleRowsSameFK")
+	if err != nil {
+		t.Fatalf("cannot open db: %s", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE parent (id BIGINT PRIMARY KEY)`)
+	if err != nil {
+		t.Fatalf("create parent: %s", err)
+	}
+	_, err = db.Exec(`CREATE TABLE child (id BIGINT, parent_id BIGINT, FOREIGN KEY (parent_id) REFERENCES parent(id))`)
+	if err != nil {
+		t.Fatalf("create child: %s", err)
+	}
+	_, err = db.Exec(`INSERT INTO parent (id) VALUES (1)`)
+	if err != nil {
+		t.Fatalf("insert parent: %s", err)
+	}
+	for i := int64(1); i <= 3; i++ {
+		_, err = db.Exec(`INSERT INTO child (id, parent_id) VALUES ($1, 1)`, i)
+		if err != nil {
+			t.Fatalf("insert child %d: %s", i, err)
+		}
+	}
+
+	rows, err := db.Query(`SELECT id FROM child WHERE parent_id = 1`)
+	if err != nil {
+		t.Fatalf("select: %s", err)
+	}
+	defer rows.Close()
+
+	var count int
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan: %s", err)
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows err: %s", err)
+	}
+	if count != 3 {
+		t.Fatalf("expected 3 rows, got %d", count)
+	}
+}

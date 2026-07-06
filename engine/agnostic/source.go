@@ -6,10 +6,10 @@ import (
 )
 
 type IndexSrc struct {
-	tuple   *list.Element
-	hasNext bool
-	rname   string
-	cols    []string
+	tuples []*list.Element
+	pos    int
+	rname  string
+	cols   []string
 }
 
 func NewHashIndexSource(index Index, alias string, p Predicate) (*IndexSrc, error) {
@@ -31,15 +31,12 @@ func NewHashIndexSource(index Index, alias string, p Predicate) (*IndexSrc, erro
 		return nil, fmt.Errorf("predicate %s is not a Eq predicate", p)
 	}
 
-	t, err := i.Get([]any{eq.right.Value(nil, nil)})
+	tuples, err := i.GetAll([]any{eq.right.Value(nil, nil)})
 	if err != nil {
 		return nil, fmt.Errorf("cannot create NewHashIndexSource(%s,%s): %s", index, p, err)
 	}
 
-	s.tuple = t
-	if t != nil {
-		s.hasNext = true
-	}
+	s.tuples = tuples
 	return s, nil
 }
 
@@ -48,15 +45,16 @@ func (s IndexSrc) String() string {
 }
 
 func (s *IndexSrc) HasNext() bool {
-	return s.hasNext
+	return s.pos < len(s.tuples)
 }
 
 func (s *IndexSrc) Next() *list.Element {
-	if !s.hasNext {
+	if s.pos >= len(s.tuples) {
 		return nil
 	}
-	s.hasNext = false
-	return s.tuple
+	e := s.tuples[s.pos]
+	s.pos++
+	return e
 }
 
 func (s *IndexSrc) Columns() []string {
@@ -64,10 +62,7 @@ func (s *IndexSrc) Columns() []string {
 }
 
 func (s *IndexSrc) EstimateCardinal() int64 {
-	if s.tuple != nil {
-		return 1
-	}
-	return 0
+	return int64(len(s.tuples))
 }
 
 type SeqScanSrc struct {
