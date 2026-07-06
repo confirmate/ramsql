@@ -21,6 +21,7 @@ type Index interface {
 	Name() string
 	CanSourceWith(p Predicate) (bool, int64)
 	Get(values []any) (*list.Element, error)
+	GetAll(values []any) ([]*list.Element, error)
 }
 
 type HashIndex struct {
@@ -29,7 +30,7 @@ type HashIndex struct {
 	relAttrs  []string
 	attrs     []int
 	attrsName []string
-	m         map[uint64]uintptr
+	m         map[uint64][]uintptr
 
 	maphash.Hash
 }
@@ -40,7 +41,7 @@ func NewHashIndex(name string, relName string, relAttrs []Attribute, attrsName [
 		relName:   relName,
 		attrs:     attrs,
 		attrsName: attrsName,
-		m:         make(map[uint64]uintptr),
+		m:         make(map[uint64][]uintptr),
 	}
 	h.SetSeed(maphash.MakeSeed())
 	for _, a := range relAttrs {
@@ -64,7 +65,7 @@ func (h *HashIndex) Add(e *list.Element) {
 	}
 	sum := h.Sum64()
 	h.Reset()
-	h.m[sum] = uintptr(unsafe.Pointer(e))
+	h.m[sum] = append(h.m[sum], uintptr(unsafe.Pointer(e)))
 }
 
 func (h *HashIndex) Remove(e *list.Element) {
@@ -78,7 +79,19 @@ func (h *HashIndex) Remove(e *list.Element) {
 	}
 	sum := h.Sum64()
 	h.Reset()
-	delete(h.m, sum)
+	ptrs := h.m[sum]
+	target := uintptr(unsafe.Pointer(e))
+	for i, p := range ptrs {
+		if p == target {
+			ptrs = append(ptrs[:i], ptrs[i+1:]...)
+			break
+		}
+	}
+	if len(ptrs) == 0 {
+		delete(h.m, sum)
+	} else {
+		h.m[sum] = ptrs
+	}
 }
 
 func (h *HashIndex) Get(values []any) (*list.Element, error) {
@@ -92,19 +105,37 @@ func (h *HashIndex) Get(values []any) (*list.Element, error) {
 	sum := h.Sum64()
 	h.Reset()
 
-	var t *list.Element
-	ptr, ok := h.m[sum]
+	ptrs, ok := h.m[sum]
+	if !ok || len(ptrs) == 0 {
+		return nil, nil
+	}
+	return (*list.Element)(unsafe.Pointer(ptrs[0])), nil
+}
+
+func (h *HashIndex) GetAll(values []any) ([]*list.Element, error) {
+	for _, v := range values {
+		if v == nil {
+			h.Write([]byte("nil"))
+			continue
+		}
+		h.Write([]byte(fmt.Sprintf("%v", v)))
+	}
+	sum := h.Sum64()
+	h.Reset()
+
+	ptrs, ok := h.m[sum]
 	if !ok {
 		return nil, nil
-		//		return nil, fmt.Errorf("could not find sum '%d' (%v) in index %s", sum, values, h)
 	}
-
-	t = (*list.Element)(unsafe.Pointer(ptr))
-	return t, nil
+	result := make([]*list.Element, len(ptrs))
+	for i, p := range ptrs {
+		result[i] = (*list.Element)(unsafe.Pointer(p))
+	}
+	return result, nil
 }
 
 func (h *HashIndex) Truncate() {
-	h.m = make(map[uint64]uintptr)
+	h.m = make(map[uint64][]uintptr)
 }
 
 func (h *HashIndex) String() string {
