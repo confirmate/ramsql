@@ -192,11 +192,6 @@ func TestInWithArrayBinding(t *testing.T) {
 	db := setupUserTable(t, "TestInWithArrayBinding")
 	defer db.Close()
 
-	// Test binding using the pq.Array wrapper (common approach for Postgres drivers)
-	// Note: When GORM sends IN queries with array binding, the SQL actually contains
-	// multiple placeholders like IN ($1, $2) not IN ($1) with an array.
-	// The real issue is when drivers expand array-like types.
-	// For now, let's test that individual placeholders work correctly.
 	query := `SELECT * FROM user WHERE user.surname IN ($1, $2, $3)`
 
 	rows, err := db.Query(query, "Doe", "Simpson", "Wayne")
@@ -220,5 +215,67 @@ func TestInWithArrayBinding(t *testing.T) {
 
 	if nb != 6 {
 		t.Fatalf("Expected 6 rows, got %d", nb)
+	}
+}
+
+// TestInWithSliceArg verifies that a single []string argument is automatically
+// expanded when used inside an IN clause (e.g. IN ($1) with arg []string{"a","b"}).
+// This mirrors how GORM passes IN parameters when using db.Where("col IN ?", slice).
+func TestInWithSliceArg(t *testing.T) {
+	db := setupUserTable(t, "TestInWithSliceArg")
+	defer db.Close()
+
+	surnames := []string{"Doe", "Simpson"}
+	rows, err := db.Query(`SELECT * FROM user WHERE user.surname IN ($1)`, surnames)
+	if err != nil {
+		t.Fatalf("db.Query with []string arg: %s", err)
+	}
+
+	var nb int
+	for rows.Next() {
+		var name, surname string
+		var age int
+		if err := rows.Scan(&name, &surname, &age); err != nil {
+			t.Fatalf("Cannot scan row: %s", err)
+		}
+		if surname != "Doe" && surname != "Simpson" {
+			t.Fatalf("Unwanted row: %s %s %d", name, surname, age)
+		}
+		nb++
+	}
+
+	if nb != 5 {
+		t.Fatalf("Expected 5 rows, got %d", nb)
+	}
+}
+
+// TestInWithSliceArgAndOtherConditions verifies that a slice IN arg works alongside
+// other conditions — the case that failed in the permission store query.
+func TestInWithSliceArgAndOtherConditions(t *testing.T) {
+	db := setupUserTable(t, "TestInWithSliceArgAndOtherConditions")
+	defer db.Close()
+
+	surnames := []string{"Doe", "Simpson"}
+	rows, err := db.Query(
+		`SELECT * FROM user WHERE user.age > $1 AND user.surname IN ($2)`,
+		30, surnames,
+	)
+	if err != nil {
+		t.Fatalf("db.Query with mixed args: %s", err)
+	}
+
+	var nb int
+	for rows.Next() {
+		var name, surname string
+		var age int
+		if err := rows.Scan(&name, &surname, &age); err != nil {
+			t.Fatalf("Cannot scan row: %s", err)
+		}
+		nb++
+	}
+
+	// John Doe (32), Jane Doe (33), Homer Simpson (40), Marge Simpson (40)
+	if nb != 4 {
+		t.Fatalf("Expected 4 rows, got %d", nb)
 	}
 }
