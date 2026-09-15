@@ -1390,6 +1390,126 @@ func TestDistinct(t *testing.T) {
 	})
 }
 
+// TestDistinctOnPreservesOrder verifies that a query combining DISTINCT ON with ORDER BY keeps
+// the rows sorted, and that a subsequent LIMIT/OFFSET (as used for offset-based pagination)
+// slices that sorted, deduplicated result deterministically and without overlap between pages.
+// This guards against a regression where DistinctSorter rebuilt its result from a Go map,
+// whose iteration order is randomized and discards the ordering established by ORDER BY.
+func TestDistinctOnPreservesOrder(t *testing.T) {
+	db, err := sql.Open("ramsql", "TestDistinctOnPreservesOrder")
+	if err != nil {
+		t.Fatalf("sql.Open: %s", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE metric (id INT, group_name TEXT, value INT)`)
+	if err != nil {
+		t.Fatalf("sql.Exec (create): %s", err)
+	}
+
+	// 5 groups, 2 rows each, with strictly increasing group_name and, within a group, the
+	// higher value is the one DISTINCT ON should keep.
+	rows := [][3]int{
+		{1, 0, 10}, {2, 0, 20},
+		{3, 1, 10}, {4, 1, 20},
+		{5, 2, 10}, {6, 2, 20},
+		{7, 3, 10}, {8, 3, 20},
+		{9, 4, 10}, {10, 4, 20},
+	}
+	for _, r := range rows {
+		_, err = db.Exec(`INSERT INTO metric (id, group_name, value) VALUES ($1, $2, $3)`, r[0], fmt.Sprintf("group-%d", r[1]), r[2])
+		if err != nil {
+			t.Fatalf("sql.Exec (insert): %s", err)
+		}
+	}
+
+	query := `SELECT DISTINCT ON (group_name) group_name, value FROM metric ORDER BY group_name, value DESC LIMIT $1 OFFSET $2`
+
+	// Without pagination, the 5 distinct groups must come back in ascending group_name order,
+	// each with its higher value (20).
+	t.Run("order without pagination", func(t *testing.T) {
+		rows, err := db.Query(query, 100, 0)
+		if err != nil {
+			t.Fatalf("sql.Query: %s", err)
+		}
+		defer rows.Close()
+
+		var i int
+		for rows.Next() {
+			var group string
+			var value int
+			if err := rows.Scan(&group, &value); err != nil {
+				t.Fatal(err)
+			}
+			if want := fmt.Sprintf("group-%d", i); group != want {
+				t.Fatalf("row %d: expected group %s, got %s", i, want, group)
+			}
+			if value != 20 {
+				t.Fatalf("row %d (%s): expected value 20, got %d", i, group, value)
+			}
+			i++
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		if i != 5 {
+			t.Fatalf("expected 5 distinct groups, got %d", i)
+		}
+	})
+
+	// Paging through with LIMIT 2 must return each of the 5 distinct groups exactly once, in
+	// ascending group_name order, across 3 pages (2, 2, 1).
+	t.Run("stable pagination", func(t *testing.T) {
+		seen := make(map[string]bool)
+		var order []string
+
+		for offset := 0; ; offset += 2 {
+			rows, err := db.Query(query, 2, offset)
+			if err != nil {
+				t.Fatalf("sql.Query (offset %d): %s", offset, err)
+			}
+
+			var n int
+			for rows.Next() {
+				var group string
+				var value int
+				if err := rows.Scan(&group, &value); err != nil {
+					t.Fatal(err)
+				}
+				if seen[group] {
+					t.Fatalf("group %s returned on more than one page", group)
+				}
+				seen[group] = true
+				order = append(order, group)
+				if value != 20 {
+					t.Fatalf("group %s: expected value 20, got %d", group, value)
+				}
+				n++
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatal(err)
+			}
+			rows.Close()
+
+			if n < 2 {
+				break
+			}
+			if offset > 20 {
+				t.Fatalf("pagination did not terminate")
+			}
+		}
+
+		if len(seen) != 5 {
+			t.Fatalf("expected 5 distinct groups across all pages, got %d", len(seen))
+		}
+		for i, group := range order {
+			if want := fmt.Sprintf("group-%d", i); group != want {
+				t.Fatalf("page order mismatch at position %d: expected %s, got %s", i, want, group)
+			}
+		}
+	})
+}
+
 func TestBracketWhereClause(t *testing.T) {
 
 	batch := []string{
