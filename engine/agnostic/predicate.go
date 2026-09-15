@@ -465,9 +465,8 @@ func (s DistinctSorter) String() string {
 }
 
 func (d *DistinctSorter) Exec() ([]string, []*list.Element, error) {
-	m := make(map[uint64]*list.Element)
+	seen := make(map[uint64]bool)
 	var h maphash.Hash
-	var ok bool
 
 	h.SetSeed(maphash.MakeSeed())
 
@@ -485,24 +484,22 @@ func (d *DistinctSorter) Exec() ([]string, []*list.Element, error) {
 		}
 	}
 
+	// Preserve the order of the input (e.g. established by a preceding ORDER BY), keeping only
+	// the first occurrence of each distinct key, instead of rebuilding the result from a map
+	// (whose iteration order is randomized in Go and would discard that order).
+	res := make([]*list.Element, 0, len(in))
 	for _, t := range in {
 		for _, idx := range idxs {
 			h.Write([]byte(fmt.Sprintf("%v", t.Value.(*Tuple).values[idx])))
 		}
 		sum := h.Sum64()
 		h.Reset()
-		_, ok = m[sum]
-		if !ok {
-			m[sum] = t
+		if !seen[sum] {
+			seen[sum] = true
+			res = append(res, t)
 		}
 	}
 
-	res := make([]*list.Element, len(m))
-	var i int
-	for _, t := range m {
-		res[i] = t
-		i++
-	}
 	return cols, res, nil
 }
 
