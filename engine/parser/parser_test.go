@@ -302,10 +302,32 @@ func TestIndex(t *testing.T) {
 		`CREATE UNIQUE INDEX IF NOT EXISTS index_name ON public.table_name (col1, col2 COLLATE NOCASE)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS index_name ON "foo"."table_name" (col1, col2 COLLATE NOCASE)`,
 		`CREATE INDEX IF NOT EXISTS "idx_products_deleted_at" ON "products" ("deleted_at")`,
+		`CREATE INDEX index_name ON table_name (col1 ASC, col2 DESC, col3 DESC)`,
+		`CREATE INDEX IF NOT EXISTS "idx_a" ON "t" ("a", "b" DESC) WHERE parent IS NULL`,
+		`CREATE INDEX IF NOT EXISTS "idx_a" ON "t" ("a") WHERE "parent" IS NULL AND x = 1`,
+		`CREATE INDEX idx_a ON t (a) WHERE b IS NULL;`,
 	}
 
 	for _, q := range queries {
 		parse(q, 1, t)
+	}
+}
+
+// A partial index predicate must not swallow the statement following it.
+func TestIndexPartialDoesNotSwallowNextStatement(t *testing.T) {
+	parse(`CREATE INDEX idx_a ON t (a DESC) WHERE b IS NULL; CREATE TABLE u (id INT)`, 2, t)
+}
+
+// Partial UNIQUE indexes cannot be emulated by indexing all rows, so they must be rejected.
+func TestIndexPartialUniqueRejected(t *testing.T) {
+	l := lexer{}
+	decls, err := l.lex([]byte(`CREATE UNIQUE INDEX idx_a ON t (a) WHERE b IS NULL`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := parser{}
+	if _, err := p.parse(decls); err == nil {
+		t.Fatal("expected an error for a partial UNIQUE index")
 	}
 }
 

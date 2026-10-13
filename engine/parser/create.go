@@ -29,7 +29,7 @@ func (p *parser) parseCreate(tokens []Token) (*Instruction, error) {
 		}
 		createDecl.Add(d)
 	case IndexToken:
-		d, err := p.parseIndex(tokens)
+		d, err := p.parseIndex(tokens, false)
 		if err != nil {
 			return nil, err
 		}
@@ -49,7 +49,7 @@ func (p *parser) parseCreate(tokens []Token) (*Instruction, error) {
 		if !p.hasNext() || tokens[p.index].Token != IndexToken {
 			return nil, fmt.Errorf("expected INDEX after UNIQUE")
 		}
-		d, err := p.parseIndex(tokens)
+		d, err := p.parseIndex(tokens, true)
 		if err != nil {
 			return nil, err
 		}
@@ -64,7 +64,7 @@ func (p *parser) parseCreate(tokens []Token) (*Instruction, error) {
 }
 
 // INDEX index_name ON table_name (col1, col2)
-func (p *parser) parseIndex(tokens []Token) (*Decl, error) {
+func (p *parser) parseIndex(tokens []Token, unique bool) (*Decl, error) {
 	var err error
 	indexDecl := NewDecl(tokens[p.index])
 	p.index++
@@ -154,6 +154,10 @@ func (p *parser) parseIndex(tokens []Token) (*Decl, error) {
 					return nil, p.syntaxError()
 				}
 				collateDecl.Add(n)
+			case AscToken, DescToken: // sort order of the index column
+				// The in-memory engine does not maintain a sort order for its indexes, so the
+				// direction does not change any result; accept and ignore it.
+				p.index++
 			default:
 				// Unknown column constraint
 				return nil, p.syntaxError()
@@ -170,6 +174,20 @@ func (p *parser) parseIndex(tokens []Token) (*Decl, error) {
 
 		// Comma means continue on next table column.
 		p.index++
+	}
+
+	// Partial index: "... WHERE <predicate>". The predicate only restricts which rows are
+	// indexed, which never changes query results, so the index is built over all rows instead.
+	// This is not safe for UNIQUE indexes, which would then be enforced on rows outside the
+	// predicate, so those are rejected.
+	if p.hasNext() && p.is(WhereToken) {
+		if unique {
+			return nil, fmt.Errorf("partial UNIQUE indexes are not supported")
+		}
+		// Skip the predicate, up to the end of the statement.
+		for p.hasNext() && !p.is(SemicolonToken) {
+			p.index++
+		}
 	}
 
 	return indexDecl, nil
